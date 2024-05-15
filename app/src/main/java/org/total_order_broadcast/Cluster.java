@@ -1,0 +1,51 @@
+package org.total_order_broadcast;
+
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
+
+import java.util.List;
+import java.util.ArrayList;
+import java.io.IOException;
+
+import org.total_order_broadcast.Node.JoinGroupMsg;
+
+
+
+public class Cluster {
+    final static int N_NODES = 2;
+
+    public static void main(String[] args) {
+
+    // Create the actor system
+    final ActorSystem system = ActorSystem.create("vssystem");
+
+    // Create a "virtual synchrony coordinator"
+    ActorRef coordinator = system.actorOf(Replica.props(-1, true), "vsmanager");
+
+    // Create nodes and put them to a list
+    List<ActorRef> group = new ArrayList<>();
+    for (int i=0; i<N_NODES; i++) {
+      group.add(system.actorOf(Replica.props(i, false), "replica-" + i));
+    }
+
+    // Send join messages to the coordinator and the nodes to inform them of the whole group
+    JoinGroupMsg start = new JoinGroupMsg(group);
+    coordinator.tell(start, ActorRef.noSender());
+    for (ActorRef peer: group) {
+      peer.tell(start, ActorRef.noSender());
+    }
+
+    inputContinue();
+
+    // system shutdown
+    system.terminate();
+  }
+
+  public static void inputContinue() {
+    try {
+      System.out.println(">>> Press ENTER to continue <<<");
+      System.in.read();
+    }
+    catch (IOException ignored) {}
+  }
+}
