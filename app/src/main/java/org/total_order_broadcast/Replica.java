@@ -22,6 +22,9 @@ public class Replica extends Node {
         .match(DecisionResponse.class, this::onDecisionResponse)
         .match(Timeout.class, this::onTimeout)
         .match(Recovery.class, this::onRecovery)
+        .match(WriteDataMsg.class, this::onUpdateMessage)
+        .match(ReadDataMsg.class, this::onReadMessage)
+        .match(ProposeValueMsg.class, this::onProposeMessage)
         .build();
     }
 
@@ -31,13 +34,14 @@ public class Replica extends Node {
 
     public void onVoteRequest(VoteRequest msg) {
       this.coordinator = getSender();
-      if (id==2) {crash(5000); return;}    // simulate a crash
+      // if (id==2) {crash(5000); return;}    // simulate a crash
       //if (id==2) delay(4000);              // simulate a delay
       if (predefinedVotes[this.id] == Vote.NO) {
-        fixDecision(Decision.ABORT);
+        fixDecision(Decision.ABORT, getValue());
       }
+
       print("sending vote " + predefinedVotes[this.id]);
-      this.coordinator.tell(new VoteResponse(predefinedVotes[this.id]), getSelf());
+      this.coordinator.tell(new VoteResponse(predefinedVotes[this.id], msg.value, msg.epochSeqNumPair), getSelf());
       setTimeout(DECISION_TIMEOUT);
     }
 
@@ -71,8 +75,22 @@ public class Replica extends Node {
     }
 
     public void onDecisionResponse(DecisionResponse msg) { /* Decision Response */
-
       // store the decision
-      fixDecision(msg.decision);
+      fixDecision(msg.decision, msg.value);
+    }
+
+    public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
+        msg.sender.tell(new DataMsg(getValue()), getSelf());
+    }
+    
+    public void onUpdateMessage(WriteDataMsg msg) { /* Value update from Client */
+      this.proposedValue = msg.value;
+      coordinator.tell(new ProposeValueMsg(this.proposedValue), getSelf());
+    }
+  
+    public void onProposeMessage(ProposeValueMsg msg) { /* Value proposal from Replica */
+      if(isCoordinator) {
+        multicast(new VoteRequest(msg.value, this.epochSeqNumPair));
+      }
     }
   }

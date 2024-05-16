@@ -17,14 +17,16 @@ public class Client extends Node {
         super(-2,false);
 
     }
+
     static public Props props(List<ActorRef> participants) {
         return Props.create(Client.class, () -> new Client());
     }
+
     public void onStartMessage(Node.StartMessage msg) {
         setGroup(msg);
     }
-    public void onSendUpdate(){
 
+    public void onSendUpdate(){
     }
 
     @Override
