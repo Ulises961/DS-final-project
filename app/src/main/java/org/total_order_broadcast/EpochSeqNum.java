@@ -16,8 +16,9 @@ public class EpochSeqNum {
         return epoch;
     }
 
-    public void increaseEpoch(){
+    public EpochSeqNum increaseEpoch(){
         this.epoch++;
+        return this;
     }
     public void setEpoch(int epoch) {
         this.epoch = epoch;
@@ -27,7 +28,8 @@ public class EpochSeqNum {
         return seqNum;
     }
 
-    public void increaseSeqNum() {
+    public EpochSeqNum increaseSeqNum() {
         this.seqNum++;
+        return this;
     }
 }

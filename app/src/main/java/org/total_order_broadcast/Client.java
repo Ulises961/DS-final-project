@@ -8,27 +8,30 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import jdk.incubator.foreign.CLinker;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
 public class Client extends Node {
 
     public Client(){
-        super(-2,false);
-
+        super(-1,false);
     }
     static public Props props(List<ActorRef> participants) {
-        return Props.create(Client.class, () -> new Client());
+        return Props.create(Client.class, Client::new);
     }
+    public static class UpdateReq implements Serializable{}
     public void onStartMessage(Node.StartMessage msg) {
         setGroup(msg);
     }
-    public void onSendUpdate(){
-
+    // the current implementation sends an update message to a random replica
+    // issue: the list of participants needs to be kept up to date wrt replicas that have crashed
+    public void onSendUpdate(SendUpdate update){
+        participants.get((int) (Math.random() * (N_PARTICIPANTS - 1))).tell(new SendUpdate(),getSelf());
     }
 
     @Override
-    protected void onRecovery(Recovery msg) {
+    public void onRecovery(Recovery msg) {
         // client doesn't crash
     }
 
@@ -36,6 +39,7 @@ public class Client extends Node {
     public Receive createReceive() {
         return receiveBuilder()
                 .match(StartMessage.class,this::onStartMessage)
+                .match(SendUpdate.class,this::onSendUpdate)
                 .build();
     }
 

@@ -23,7 +23,7 @@ public abstract class Node extends AbstractActor {
     protected int quorum;
 
     // dedicated class to keep track of epoch and seqNum pairs :)
-    private EpochSeqNum epochSeqNumPair;
+    protected EpochSeqNum epochSeqNumPair;
 
 
     // whether the node should join through the manager
@@ -33,7 +33,7 @@ public abstract class Node extends AbstractActor {
     private final Set<ActorRef> group;
     private final Set<ActorRef> currentView;
 
-    // each view has is assocaited w/ an Epoch
+    // each view is associated w/ an Epoch
     private final Map<EpochSeqNum, Set<ActorRef>> proposedView;
 
 
@@ -115,6 +115,7 @@ public abstract class Node extends AbstractActor {
     }
 
     public static class DecisionRequest implements Serializable {}
+    public static class SendUpdate implements Serializable{}
 
     public static class DecisionResponse implements Serializable {
         public final Decision decision;
@@ -294,9 +295,12 @@ public abstract class Node extends AbstractActor {
       // just ignoring if we don't know the decision
     }
     public ActorRef getCoordinator(){
-        for (ActorRef a: participants){
-      //TODO : create a method that returns the coordinator
+        ActorRef coord = null;
+        if (!isCoordinator) {
+            for (ActorRef a : participants) {
+                //TODO : create a method that returns the coordinator
+            }
         }
-        return null;
+        return coord;
     }
   }
