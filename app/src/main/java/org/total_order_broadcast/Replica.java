@@ -86,6 +86,7 @@ public class Replica extends Node {
       setGroup(msg);
     }
 
+
     public void onTimeout(Timeout msg) {
 
     }
