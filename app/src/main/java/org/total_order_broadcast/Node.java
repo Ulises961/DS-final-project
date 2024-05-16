@@ -51,34 +51,24 @@ public abstract class Node extends AbstractActor {
   // group view flushes
   private final Map<Integer, Set<ActorRef>> flushes;
 
-  // type of the next simulated crash
-  enum CrashType {
-    NONE,
-    ChatMsg,
-    StableChatMsg,
-    ViewFlushMsg
-  }
 
-  private CrashType nextCrash;
 
-  // number of transmissions before crashing
-  private int nextCrashAfter;
 
-  public Node(int id, boolean isCoordinator) {
-    super();
-    this.id = id;
-    this.epochSeqNumPair = new EpochSeqNum(0, 0);
-    this.isCoordinator = isCoordinator;
-    this.group = new HashSet<>();
-    this.currentView = new HashSet<>();
-    this.proposedView = new HashMap<>();
-    this.membersSeqno = new HashMap<>();
-    this.deferredMsgSet = new HashSet<>();
-    this.flushes = new HashMap<>();
-    this.nextCrash = CrashType.NONE;
-    this.nextCrashAfter = 0;
-    this.quorum = (N_PARTICIPANTS / 2) + 1;
-  }
+    public Node(int id, boolean isCoordinator) {
+        super();
+        this.id = id;
+        this.epochSeqNumPair = new EpochSeqNum(0,0);
+        this.isCoordinator = isCoordinator;
+        this.group = new HashSet<>();
+        this.currentView = new HashSet<>();
+        this.proposedView = new HashMap<>();
+        this.membersSeqno = new HashMap<>();
+        this.unstableMsgSet = new HashSet<>();
+        this.deferredMsgSet = new HashSet<>();
+        this.flushes = new HashMap<>();
+        this.rnd = new Random();
+        this.quorum = (N_PARTICIPANTS/2) + 1;
+    }
 
   private void updateQuorum() {
     this.quorum = currentView.size() / 2 + 1;
@@ -207,13 +197,7 @@ public abstract class Node extends AbstractActor {
   }
 
   public static class CrashMsg implements Serializable {
-    public final CrashType nextCrash;
-    public final Integer nextCrashAfter;
 
-    public CrashMsg(CrashType nextCrash, int nextCrashAfter) {
-      this.nextCrash = nextCrash;
-      this.nextCrashAfter = nextCrashAfter;
-    }
   }
 
   public static class RecoveryMsg implements Serializable {

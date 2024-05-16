@@ -46,7 +46,12 @@ public class Replica extends Node {
         .match(Ack.class, this::onAckReceived)
         .match(SendUpdate.class,this::onSendUpdate)
         .match(WriteOk.class, this::onWriteOk)
+              .match(Client.RequestRead.class, this::onRequestRead)
         .build();
+    }
+
+    public void onRequestRead(Client.RequestRead msg) {
+        getSender().tell(msg.setEpochSeqNum(this.epochSeqNumPair), getSelf());
     }
 
     public void onUpdate(UpdateMsg update){

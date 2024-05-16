@@ -21,7 +21,6 @@ public class Cluster {
 
     // Create a "virtual synchrony coordinator" by default the coordinator is the node with max(ID)
     ActorRef coordinator = system.actorOf(Replica.props(N_NODES, true), "vsmanager");
-
     // Create nodes and put them to a list
     List<ActorRef> group = new ArrayList<>();
     for (int i=N_NODES-1; i>-1; i--) {
@@ -29,6 +28,7 @@ public class Cluster {
     }
 
     // Send join messages to the coordinator and the nodes to inform them of the whole group
+    // TODO instantiate client
     JoinGroupMsg start = new JoinGroupMsg(group);
     coordinator.tell(start, ActorRef.noSender());
     for (ActorRef peer: group) {
