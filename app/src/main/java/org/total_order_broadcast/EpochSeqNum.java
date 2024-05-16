@@ -32,4 +32,7 @@ public class EpochSeqNum {
         this.seqNum++;
         return this;
     }
+    public void rollbackSeqNum(){
+        this.seqNum--;
+    }
 }

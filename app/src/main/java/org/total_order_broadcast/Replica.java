@@ -10,11 +10,16 @@ public class Replica extends Node {
     HashSet<ActorRef> receivedAcks;
     EpochSeqNum acceptedEpochSeqNum;
     EpochSeqNum proposedEpochSeqNum;
-    private boolean waitingAcks = false;
+    private boolean expectingAcks = false;
 
     public Replica(int id, boolean isCoordinator) {
         super(id, isCoordinator);
         this.receivedAcks = new HashSet<>();
+    }
+
+    @Override
+    protected void onRecovery(Recovery msg) {
+        // this is pointless as nodes don't recover after crashing (see slides)
     }
 
     static public Props props(int id,  boolean isCoordinator) {
@@ -32,9 +37,6 @@ public class Replica extends Node {
     public Receive createReceive() {
       return receiveBuilder()
         .match(StartMessage.class, this::onStartMessage)
-        .match(VoteRequest.class, this::onVoteRequest)
-        .match(DecisionRequest.class, this::onDecisionRequest)
-        .match(DecisionResponse.class, this::onDecisionResponse)
         .match(Timeout.class, this::onTimeout)
         .match(Recovery.class, this::onRecovery)
         .match(UpdateMsg.class, this::onUpdate)
@@ -53,18 +55,22 @@ public class Replica extends Node {
         this.acceptedEpochSeqNum = this.proposedEpochSeqNum;
     }
     public void onAckReceived(Ack a){
-        ActorRef sender = getSender();
-        receivedAcks.add(sender);
-        if (receivedAcks.size() >= quorum){ // enough acks received, now send WRITEOK message
-            multicast(new WriteOk());
+        if (expectingAcks) {
+            ActorRef sender = getSender();
+            receivedAcks.add(sender);
+            if (receivedAcks.size() >= quorum) { // enough acks received, now send WRITEOK message
+                multicast(new WriteOk());
+                expectingAcks = false; // update phase completed, no more acks expected
+            }
         }
     }
     // either starts the update or forwards message to the coordinator
     public void onSendUpdate(SendUpdate update){
         if (this.isCoordinator){
-            // this node is the coordinator so send update message to all replicas
-            waitingAcks = true;
+            // this node is the coordinator so it can send the update to all replicas
+            expectingAcks = true;
             multicast(new UpdateMsg(epochSeqNumPair.increaseSeqNum()));
+            // TODO start timer, if the timer expires rollback seqNumber i.e. epochSeqNumPair.rollbackSeqNum()
         }else{
             // forward request to the coordinator
             // TODO impolement getCoorinator()
@@ -88,37 +94,18 @@ public class Replica extends Node {
     }
 
     public void onTimeout(Timeout msg) {
-      if (!hasDecided()) { 
-        if(predefinedVotes[this.id] == Vote.YES) {
-          print("Timeout. I voted yes. Need to ask around");
-          multicast(new DecisionRequest());
-          // ask also the coordinator
-         coordinator.tell(new DecisionRequest(), getSelf());
-         setTimeout(DECISION_TIMEOUT);
-        } else {
-          //Do nothing as decision is aborted
-          print("Timeout. I voted No. I can safely ABORT.");
+        if (!hasDecided()) {
+            if (predefinedVotes[this.id] == Vote.YES) {
+                print("Timeout. I voted yes. Need to ask around");
+                multicast(new DecisionRequest());
+                // ask also the coordinator
+                coordinator.tell(new DecisionRequest(), getSelf());
+                setTimeout(DECISION_TIMEOUT);
+            } else {
+                //Do nothing as decision is aborted
+                print("Timeout. I voted No. I can safely ABORT.");
+            }
         }
-      }
-        
-    }
 
-    @Override
-    public void onRecovery(Recovery msg) {
-      getContext().become(createReceive());
-
-      // We don't handle explicitly the "not voted" case here
-      // (in any case, it does not break the protocol)
-      if (!hasDecided()) {
-        print("Recovery. Asking the coordinator.");
-        coordinator.tell(new DecisionRequest(), getSelf());
-        setTimeout(DECISION_TIMEOUT);
-      }
-    }
-
-    public void onDecisionResponse(DecisionResponse msg) { /* Decision Response */
-
-      // store the decision
-      fixDecision(msg.decision);
     }
   }
