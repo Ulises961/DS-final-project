@@ -18,7 +18,6 @@ import akka.actor.*;
 public abstract class Node extends AbstractActor {
     protected int id;                           // node ID
     protected List<ActorRef> participants;      // list of participant nodes
-    protected Decision decision = null;// decision taken by this node
 
     protected int quorum;
 
@@ -51,20 +50,8 @@ public abstract class Node extends AbstractActor {
 
     private final Random rnd;
 
-    // type of the next simulated crash
-    enum CrashType {
-        NONE,
-        ChatMsg,
-        StableChatMsg,
-        ViewFlushMsg
-    }
-    private CrashType nextCrash;
 
-    // number of transmissions before crashing
-    private int nextCrashAfter;
 
-    // prepare to recover (to handle RecoveryMsg received before crashing)
-    private boolean willRecover;
 
     public Node(int id, boolean isCoordinator) {
         super();
@@ -79,9 +66,6 @@ public abstract class Node extends AbstractActor {
         this.deferredMsgSet = new HashSet<>();
         this.flushes = new HashMap<>();
         this.rnd = new Random();
-        this.nextCrash = CrashType.NONE;
-        this.nextCrashAfter = 0;
-        this.willRecover = false;
         this.quorum = (N_PARTICIPANTS/2) + 1;
     }
 
@@ -187,12 +171,7 @@ public abstract class Node extends AbstractActor {
   }
 
   public static class CrashMsg implements Serializable {
-    public final CrashType nextCrash;
-    public final Integer nextCrashAfter;
-    public CrashMsg(CrashType nextCrash, int nextCrashAfter) {
-      this.nextCrash = nextCrash;
-      this.nextCrashAfter = nextCrashAfter;
-    }
+
   }
 
   public static class RecoveryMsg implements Serializable {}
@@ -255,15 +234,6 @@ public abstract class Node extends AbstractActor {
           );
     }
 
-    // fix the final decision of the current node
-    void fixDecision(Decision d) {
-      if (!hasDecided()) {
-        this.decision = d;
-        print("decided " + d);
-      }
-    }
-
-    boolean hasDecided() { return decision != null; } // has the node decided?
 
     // a simple logging function
     void print(String s) {
@@ -284,16 +254,7 @@ public abstract class Node extends AbstractActor {
               .build();
     }
 
-    public void onDecisionRequest(DecisionRequest msg) {  /* Decision Request */
-      if (hasDecided()) {
-        getSender().tell(new DecisionResponse(decision), getSelf());
-          String message = "received decision request from " +
-                  getSender() +
-                  decision.toString();
-        print(message);
-      }
-      // just ignoring if we don't know the decision
-    }
+
     public ActorRef getCoordinator(){
         ActorRef coord = null;
         if (!isCoordinator) {

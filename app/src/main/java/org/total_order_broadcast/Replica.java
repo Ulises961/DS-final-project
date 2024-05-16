@@ -43,7 +43,12 @@ public class Replica extends Node {
         .match(Ack.class, this::onAckReceived)
         .match(SendUpdate.class,this::onSendUpdate)
         .match(WriteOk.class, this::onWriteOk)
+              .match(Client.RequestRead.class, this::onRequestRead)
         .build();
+    }
+
+    public void onRequestRead(Client.RequestRead msg) {
+        getSender().tell(msg.setEpochSeqNum(this.epochSeqNumPair), getSelf());
     }
 
     public void onUpdate(UpdateMsg update){
@@ -73,7 +78,7 @@ public class Replica extends Node {
             // TODO start timer, if the timer expires rollback seqNumber i.e. epochSeqNumPair.rollbackSeqNum()
         }else{
             // forward request to the coordinator
-            // TODO impolement getCoorinator()
+            // TODO implement getCoordinator()
             getCoordinator().tell(new SendUpdate(),getSelf());
         }
     }
@@ -81,31 +86,7 @@ public class Replica extends Node {
       setGroup(msg);
     }
 
-    public void onVoteRequest(VoteRequest msg) {
-      this.coordinator = getSender();
-      if (id==2) {crash(5000); return;}    // simulate a crash
-      //if (id==2) delay(4000);              // simulate a delay
-      if (predefinedVotes[this.id] == Vote.NO) {
-        fixDecision(Decision.ABORT);
-      }
-      print("sending vote " + predefinedVotes[this.id]);
-      this.coordinator.tell(new VoteResponse(predefinedVotes[this.id]), getSelf());
-      setTimeout(DECISION_TIMEOUT);
-    }
-
     public void onTimeout(Timeout msg) {
-        if (!hasDecided()) {
-            if (predefinedVotes[this.id] == Vote.YES) {
-                print("Timeout. I voted yes. Need to ask around");
-                multicast(new DecisionRequest());
-                // ask also the coordinator
-                coordinator.tell(new DecisionRequest(), getSelf());
-                setTimeout(DECISION_TIMEOUT);
-            } else {
-                //Do nothing as decision is aborted
-                print("Timeout. I voted No. I can safely ABORT.");
-            }
-        }
 
     }
   }

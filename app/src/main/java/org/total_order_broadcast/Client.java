@@ -3,13 +3,10 @@
  */
 package org.total_order_broadcast;
 
-import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import jdk.incubator.foreign.CLinker;
 
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.List;
 
 public class Client extends Node {
@@ -20,14 +17,15 @@ public class Client extends Node {
     static public Props props(List<ActorRef> participants) {
         return Props.create(Client.class, Client::new);
     }
-    public static class UpdateReq implements Serializable{}
+    public static class UpdateRequest implements Serializable{}
+    public static class ReadResponse implements Serializable{}
     public void onStartMessage(Node.StartMessage msg) {
         setGroup(msg);
     }
     // the current implementation sends an update message to a random replica
     // issue: the list of participants needs to be kept up to date wrt replicas that have crashed
     public void onSendUpdate(SendUpdate update){
-        participants.get((int) (Math.random() * (N_PARTICIPANTS - 1))).tell(new SendUpdate(),getSelf());
+        participants.get((int) (Math.random() * (N_PARTICIPANTS - 1))).tell(update,getSelf());
     }
 
     @Override
@@ -35,11 +33,37 @@ public class Client extends Node {
         // client doesn't crash
     }
 
-    @Override
+    public static class RequestRead{
+        EpochSeqNum epochSeqNum;
+        public RequestRead(){}
+
+        public RequestRead setEpochSeqNum(EpochSeqNum epochSeqNum){
+            this.epochSeqNum = epochSeqNum;
+            return this;
+        }
+
+        @Override
+        public String toString() {
+            return "RequestRead{" +
+                    "epochSeqNum=" + epochSeqNum +
+                    '}';
+        }
+    }
+
+    public void onRequestRead(RequestRead req){
+        participants.get((int) (Math.random() * (N_PARTICIPANTS - 1))).tell(req,getSelf());
+    }
+
+    public void onReadResponse(ReadResponse res) {
+        System.out.println("Client received:"+res);
+    }
+        @Override
     public Receive createReceive() {
         return receiveBuilder()
                 .match(StartMessage.class,this::onStartMessage)
                 .match(SendUpdate.class,this::onSendUpdate)
+                .match(RequestRead.class, this::onRequestRead)
+                .match(ReadResponse.class, this::onReadResponse)
                 .build();
     }
 

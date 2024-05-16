@@ -35,4 +35,12 @@ public class EpochSeqNum {
     public void rollbackSeqNum(){
         this.seqNum--;
     }
+
+    @Override
+    public String toString() {
+        return "EpochSeqNum{" +
+                "epoch=" + epoch +
+                ", seqNum=" + seqNum +
+                '}';
+    }
 }
