@@ -46,6 +46,8 @@ public class Replica extends Node {
 
     public void onUpdate(UpdateMsg update){
         this.proposedEpochSeqNum = update.epochSeqNum;
+        // send ack
+        getSender().tell(new Ack(), getSelf());
     }
     public void onWriteOk(WriteOk okay){
         this.acceptedEpochSeqNum = this.proposedEpochSeqNum;
