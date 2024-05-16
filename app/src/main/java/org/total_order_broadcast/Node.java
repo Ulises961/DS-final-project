@@ -28,8 +28,9 @@ public abstract class Node extends AbstractActor {
 
   protected Integer currentValue;
 
-  // dedicated class to keep track of epoch and seqNum pairs :)
-  protected EpochSeqNum epochSeqNumPair;
+    // dedicated class to keep track of epoch and seqNum pairs :)
+    protected EpochSeqNum epochSeqNumPair;
+
 
   // whether the node should join through the manager
   public boolean isCoordinator;
@@ -39,8 +40,9 @@ public abstract class Node extends AbstractActor {
 
   private final Set<ActorRef> currentView;
 
-  // each view has is assocaited w/ an Epoch
-  private final Map<EpochSeqNum, Set<ActorRef>> proposedView;
+    // each view is associated w/ an Epoch
+    private final Map<EpochSeqNum, Set<ActorRef>> proposedView;
+
 
   // last sequence number for each node message (to avoid delivering duplicates)
   private final Map<ActorRef, Integer> membersSeqno;
