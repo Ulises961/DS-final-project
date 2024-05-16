@@ -77,7 +77,7 @@ public class Replica extends Node {
         }else{
             // forward request to the coordinator
             // TODO impolement getCoorinator()
-            getCoordinator().tell(new SendUpdate(),getSelf());
+            coordinator.tell(new SendUpdate(),getSelf());
         }
     }
     public void onStartMessage(StartMessage msg) {
@@ -98,37 +98,37 @@ public class Replica extends Node {
     }
 
     public void onTimeout(Timeout msg) {
-      if (!hasDecided()) { 
-        if(predefinedVotes[this.id] == Vote.YES) {
-          print("Timeout. I voted yes. Need to ask around");
-          multicast(new DecisionRequest());
-          // ask also the coordinator
-         coordinator.tell(new DecisionRequest(), getSelf());
-         setTimeout(DECISION_TIMEOUT);
-        } else {
-          //Do nothing as decision is aborted
-          print("Timeout. I voted No. I can safely ABORT.");
+        if (!hasDecided()) {
+            if (predefinedVotes[this.id] == Vote.YES) {
+                print("Timeout. I voted yes. Need to ask around");
+                multicast(new DecisionRequest());
+                // ask also the coordinator
+                coordinator.tell(new DecisionRequest(), getSelf());
+                setTimeout(DECISION_TIMEOUT);
+            } else {
+                //Do nothing as decision is aborted
+                print("Timeout. I voted No. I can safely ABORT.");
+            }
         }
-      }
-        
-    }
-
-    @Override
-    public void onRecovery(Recovery msg) {
-      getContext().become(createReceive());
-
-      // We don't handle explicitly the "not voted" case here
-      // (in any case, it does not break the protocol)
-      if (!hasDecided()) {
-        print("Recovery. Asking the coordinator.");
-        coordinator.tell(new DecisionRequest(), getSelf());
-        setTimeout(DECISION_TIMEOUT);
-      }
     }
 
     public void onDecisionResponse(DecisionResponse msg) { /* Decision Response */
-
       // store the decision
-      fixDecision(msg.decision);
+      fixDecision(msg.decision, msg.value);
+    }
+
+    public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
+        msg.sender.tell(new DataMsg(getValue()), getSelf());
+    }
+    
+    public void onUpdateMessage(WriteDataMsg msg) { /* Value update from Client */
+      this.proposedValue = msg.value;
+      coordinator.tell(new ProposeValueMsg(this.proposedValue), getSelf());
+    }
+  
+    public void onProposeMessage(ProposeValueMsg msg) { /* Value proposal from Replica */
+      if(isCoordinator) {
+        multicast(new VoteRequest(msg.value, this.epochSeqNumPair));
+      }
     }
   }

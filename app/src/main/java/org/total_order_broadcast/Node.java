@@ -28,9 +28,8 @@ public abstract class Node extends AbstractActor {
 
   protected Integer currentValue;
 
-    // dedicated class to keep track of epoch and seqNum pairs :)
-    protected EpochSeqNum epochSeqNumPair;
-
+  // dedicated class to keep track of epoch and seqNum pairs :)
+  protected EpochSeqNum epochSeqNumPair;
 
   // whether the node should join through the manager
   public boolean isCoordinator;
@@ -40,9 +39,8 @@ public abstract class Node extends AbstractActor {
 
   private final Set<ActorRef> currentView;
 
-    // each view is associated w/ an Epoch
-    private final Map<EpochSeqNum, Set<ActorRef>> proposedView;
-
+  // each view has is assocaited w/ an Epoch
+  private final Map<EpochSeqNum, Set<ActorRef>> proposedView;
 
   // last sequence number for each node message (to avoid delivering duplicates)
   private final Map<ActorRef, Integer> membersSeqno;
@@ -153,12 +151,13 @@ public abstract class Node extends AbstractActor {
   }
 
   public static class JoinGroupMsg implements Serializable {
-    public final List<ActorRef> group; // an array of group members
-
+    public final List<ActorRef> group;   // an array of group members
     public JoinGroupMsg(List<ActorRef> group) {
       this.group = Collections.unmodifiableList(new ArrayList<>(group));
     }
   }
+
+  public static class SendUpdate implements Serializable{}
 
   public static class ReadDataMsg implements Serializable {
     public final ActorRef sender;
@@ -328,13 +327,5 @@ public abstract class Node extends AbstractActor {
           decision.toString();
       print(message);
     }
-    // just ignoring if we don't know the decision
-  }
-
-  public ActorRef getCoordinator() {
-    for (ActorRef a : participants) {
-      // TODO : create a method that returns the coordinator
-    }
-    return null;
   }
 }
