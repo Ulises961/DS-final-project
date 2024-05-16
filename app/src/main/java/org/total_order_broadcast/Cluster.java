@@ -19,12 +19,12 @@ public class Cluster {
     // Create the actor system
     final ActorSystem system = ActorSystem.create("vssystem");
 
-    // Create a "virtual synchrony coordinator"
-    ActorRef coordinator = system.actorOf(Replica.props(-1, true), "vsmanager");
+    // Create a "virtual synchrony coordinator" by default the coordinator is the node with max(ID)
+    ActorRef coordinator = system.actorOf(Replica.props(N_NODES, true), "vsmanager");
 
     // Create nodes and put them to a list
     List<ActorRef> group = new ArrayList<>();
-    for (int i=0; i<N_NODES; i++) {
+    for (int i=N_NODES-1; i>-1; i--) {
       group.add(system.actorOf(Replica.props(i, false), "replica-" + i));
     }
 

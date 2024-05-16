@@ -3,12 +3,40 @@
  */
 package org.total_order_broadcast;
 
-public class Client {
-    public String getGreeting() {
-        return "Hello World!";
+import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
+import akka.actor.Props;
+import jdk.incubator.foreign.CLinker;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class Client extends Node {
+
+    public Client(){
+        super(-2,false);
+
+    }
+    static public Props props(List<ActorRef> participants) {
+        return Props.create(Client.class, () -> new Client());
+    }
+    public void onStartMessage(Node.StartMessage msg) {
+        setGroup(msg);
+    }
+    public void onSendUpdate(){
+
     }
 
-    public static void main(String[] args) {
-        System.out.println(new Client().getGreeting());
+    @Override
+    protected void onRecovery(Recovery msg) {
+        // client doesn't crash
     }
+
+    @Override
+    public Receive createReceive() {
+        return receiveBuilder()
+                .match(StartMessage.class,this::onStartMessage)
+                .build();
+    }
+
 }

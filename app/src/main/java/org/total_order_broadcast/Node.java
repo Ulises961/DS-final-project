@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.io.IOException;
 import java.io.Serializable;
 
 import scala.concurrent.duration.Duration;
@@ -19,18 +18,24 @@ import akka.actor.*;
 public abstract class Node extends AbstractActor {
     protected int id;                           // node ID
     protected List<ActorRef> participants;      // list of participant nodes
-    protected Decision decision = null;         // decision taken by this node
-     // message sequence number for identification
-    private int seqno;
+    protected Decision decision = null;// decision taken by this node
+
+    protected int quorum;
+
+    // dedicated class to keep track of epoch and seqNum pairs :)
+    private EpochSeqNum epochSeqNumPair;
+
 
     // whether the node should join through the manager
-    private boolean isCoordinator;
+    public boolean isCoordinator;
 
     // participants (initial group, current and proposed views)
     private final Set<ActorRef> group;
     private final Set<ActorRef> currentView;
-    private final Map<Integer, Set<ActorRef>> proposedView;
-    private int viewId;
+
+    // each view has is assocaited w/ an Epoch
+    private final Map<EpochSeqNum, Set<ActorRef>> proposedView;
+
 
     // last sequence number for each node message (to avoid delivering duplicates)
     private final Map<ActorRef, Integer> membersSeqno;
@@ -64,9 +69,8 @@ public abstract class Node extends AbstractActor {
     public Node(int id, boolean isCoordinator) {
         super();
         this.id = id;
-        this.seqno = 1;
+        this.epochSeqNumPair = new EpochSeqNum(0,0);
         this.isCoordinator = isCoordinator;
-        this.viewId = 0;
         this.group = new HashSet<>();
         this.currentView = new HashSet<>();
         this.proposedView = new HashMap<>();
@@ -78,8 +82,12 @@ public abstract class Node extends AbstractActor {
         this.nextCrash = CrashType.NONE;
         this.nextCrashAfter = 0;
         this.willRecover = false;
+        this.quorum = (N_PARTICIPANTS/2) + 1;
     }
 
+    private void updateQuorum(){
+        this.quorum = currentView.size()/2 +1;
+    }
     final static int N_PARTICIPANTS = 3;
     final static int VOTE_TIMEOUT = 1000;      // timeout for the votes, ms
     final static int DECISION_TIMEOUT = 2000;  // timeout for the decision, ms
@@ -284,5 +292,11 @@ public abstract class Node extends AbstractActor {
         print(message);
       }
       // just ignoring if we don't know the decision
+    }
+    public ActorRef getCoordinator(){
+        for (ActorRef a: participants){
+      //TODO : create a method that returns the coordinator
+        }
+        return null;
     }
   }
