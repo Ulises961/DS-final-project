@@ -63,10 +63,8 @@ public abstract class Node extends AbstractActor {
         this.currentView = new HashSet<>();
         this.proposedView = new HashMap<>();
         this.membersSeqno = new HashMap<>();
-        this.unstableMsgSet = new HashSet<>();
         this.deferredMsgSet = new HashSet<>();
         this.flushes = new HashMap<>();
-        this.rnd = new Random();
         this.quorum = (N_PARTICIPANTS/2) + 1;
     }
 
