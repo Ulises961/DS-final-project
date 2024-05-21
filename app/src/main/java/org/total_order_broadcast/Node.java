@@ -20,11 +20,7 @@ public abstract class Node extends AbstractActor {
 
   protected List<ActorRef> participants; // list of participant nodes
 
-  protected Decision decision = null;// decision taken by this node
-
   protected int quorum;
-
-  protected Integer proposedValue;
 
   protected Integer currentValue;
 
@@ -54,22 +50,22 @@ public abstract class Node extends AbstractActor {
   // group view flushes
   protected final Map<Integer, Set<ActorRef>> flushes;
 
+  // TODO missed updates message to bring replicas up to date, from the
+  // coordinator
 
-
-
-    public Node(int id) {
-        super();
-        this.id = id;
-        this.epochSeqNumPair = new EpochSeqNum(0,0);
-        this.group = new HashSet<>();
-        this.currentView = new HashSet<>();
-        this.proposedView = new HashMap<>();
-        this.membersSeqno = new HashMap<>();
-        this.updateHistory = new HashMap<>();
-        this.deferredMsgSet = new HashSet<>();
-        this.flushes = new HashMap<>();
-        this.quorum = (N_PARTICIPANTS/2) + 1;
-    }
+  public Node(int id) {
+    super();
+    this.id = id;
+    this.epochSeqNumPair = new EpochSeqNum(0, 0);
+    this.group = new HashSet<>();
+    this.currentView = new HashSet<>();
+    this.proposedView = new HashMap<>();
+    this.membersSeqno = new HashMap<>();
+    this.updateHistory = new HashMap<>();
+    this.deferredMsgSet = new HashSet<>();
+    this.flushes = new HashMap<>();
+    this.quorum = (N_PARTICIPANTS / 2) + 1;
+  }
 
   private void updateQuorum() {
     this.quorum = currentView.size() / 2 + 1;
@@ -79,79 +75,81 @@ public abstract class Node extends AbstractActor {
   final static int VOTE_TIMEOUT = 1000; // timeout for the votes, ms
   final static int DECISION_TIMEOUT = 2000; // timeout for the decision, ms
 
-  // the votes that the participants will send (for testing)
-  final static Vote[] predefinedVotes = new Vote[] { Vote.YES, Vote.YES, Vote.YES }; // as many as N_PARTICIPANTS
-
   // Start message that sends the list of participants to everyone
   public static class StartMessage implements Serializable {
     public final List<ActorRef> group;
     public final ActorRef coordinator;
+
     public StartMessage(List<ActorRef> group, ActorRef coordinator) {
       this.group = Collections.unmodifiableList(new ArrayList<>(group));
       this.coordinator = coordinator;
     }
   }
 
-  public enum Vote {
-    NO, YES
-  }
-
-  public enum Decision {
-    ABORT, COMMIT
-  }
-
-  public static class VoteRequest implements Serializable {
+  public static class UpdateRequest implements Serializable {
     public final Integer value;
-    public final EpochSeqNum epochSeqNumPair;
+    public final EpochSeqNum epochSeqNum;
 
-    public VoteRequest(Integer value, EpochSeqNum epochSeqNumPair) {
+    public UpdateRequest(Integer value, EpochSeqNum epochSeqNum) {
       this.value = value;
-      this.epochSeqNumPair = epochSeqNumPair;
+      this.epochSeqNum = epochSeqNum;
     }
   }
 
-  public static class VoteResponse implements Serializable {
-    public final Vote vote;
+  public static class UpdateAck implements Serializable {
     public final Integer value;
-    public final EpochSeqNum epochSeqNumPair;
+    public final EpochSeqNum epochSeqNum;
 
-    public VoteResponse(Vote v, Integer val, EpochSeqNum epochSeqNumPair) {
-      vote = v;
+    public UpdateAck(Integer val, EpochSeqNum epochSeqNum) {
       value = val;
-      this.epochSeqNumPair = epochSeqNumPair;
+      this.epochSeqNum = epochSeqNum;
     }
   }
 
   public static class DecisionRequest implements Serializable {
+    public final EpochSeqNum epochSeqNum;
+
+    public DecisionRequest(EpochSeqNum epochSeqNum) {
+      this.epochSeqNum = epochSeqNum;
+    }
   }
 
-  public static class DecisionResponse implements Serializable {
-    public final Decision decision;
+  public static class WriteOk implements Serializable {
     public final Integer value;
+    public final EpochSeqNum epochSeqNum;
 
-
-    public DecisionResponse(Decision d, Integer v) {
-      decision = d;
+    public WriteOk(Integer v, EpochSeqNum epochSeqNum) {
       value = v;
+      this.epochSeqNum = epochSeqNum;
     }
   }
 
   public static class Timeout implements Serializable {
   }
 
+  public static class UpdateTimeOut extends Timeout {
+    public final EpochSeqNum epochSeqNum;
+
+    public UpdateTimeOut(EpochSeqNum esn) {
+      epochSeqNum = esn;
+    }
+  }
+
   public static class Recovery implements Serializable {
   }
 
   public static class JoinGroupMsg implements Serializable {
-    public final List<ActorRef> group;   // an array of group members
-    public final ActorRef coordinator;   // the coordinator
+    public final List<ActorRef> group; // an array of group members
+    public final ActorRef coordinator; // the coordinator
+
     public JoinGroupMsg(List<ActorRef> group, ActorRef coordinator) {
       this.group = Collections.unmodifiableList(new ArrayList<>(group));
       this.coordinator = coordinator;
     }
   }
-   
-  public static class ReadDataMsg implements Serializable {}
+
+  public static class ReadDataMsg implements Serializable {
+  }
 
   public static class DataMsg implements Serializable {
     Integer value;
@@ -166,7 +164,6 @@ public abstract class Node extends AbstractActor {
   public static class WriteDataMsg implements Serializable {
     public final Integer value;
     ActorRef sender;
-
 
     public WriteDataMsg(Integer value, ActorRef sender) {
       this.value = value;
@@ -184,32 +181,27 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  public static class ProposeValueMsg implements Serializable {
-    public final Integer value;
-
-    public ProposeValueMsg(Integer value) {
-      this.value = value;
-    }
+  public static class CrashMsg implements Serializable {
   }
 
-  public static class CrashMsg implements Serializable {}
-
-  public static class RecoveryMsg implements Serializable {}
+  public static class RecoveryMsg implements Serializable {
+  }
 
   public void setValue(int value) {
-      this.currentValue = value;
+    this.currentValue = value;
   }
 
   public int getValue() {
-      return currentValue;
+    return currentValue;
   }
+
   // abstract method to be implemented in extending classes
   protected abstract void onRecovery(Recovery msg);
 
   void setGroup(JoinGroupMsg sm) {
     participants = new ArrayList<>();
     for (ActorRef b : sm.group) {
-      this.participants.add(b); 
+      this.participants.add(b);
     }
     print("Starting with " + sm.group.size() + " peer(s)");
   }
@@ -250,27 +242,27 @@ public abstract class Node extends AbstractActor {
   }
 
   // schedule a Timeout message in specified time
-  Cancellable setTimeout(int time) {
+  Cancellable setTimeout(int time, Timeout timeout) {
     return getContext().system().scheduler().scheduleOnce(
         Duration.create(time, TimeUnit.MILLISECONDS),
         getSelf(),
-        new Timeout(), // the message to send
+        timeout, // the message to send
         getContext().system().dispatcher(), getSelf());
   }
 
   // fix the final decision of the current node
-  void fixDecision(Decision d, Integer v) {
-    if (!hasDecided()) {
-      this.decision = d;
-      this.currentValue = v;
-      this.proposedValue = null;
-      this.updateHistory.put(epochSeqNumPair, v);
-      print("decided " + d);
+  void fixDecision(Integer v, EpochSeqNum epochSeqNum) {
+    if (!hasDecided(epochSeqNum)) {
+      currentValue = v;
+      updateHistory.put(epochSeqNum, v);
+
+      print("Fixing value " + currentValue);
+      print("Update History " + updateHistory.toString());
     }
   }
 
-  boolean hasDecided() {
-    return decision != null;
+  boolean hasDecided(EpochSeqNum epochSeqNum) {
+    return this.updateHistory.get(epochSeqNum) != null;
   } // has the node decided?
 
   // a simple logging function
@@ -294,13 +286,22 @@ public abstract class Node extends AbstractActor {
   }
 
   public void onDecisionRequest(DecisionRequest msg) { /* Decision Request */
-    if (hasDecided()) {
-      getSender().tell(new DecisionResponse(decision, this.currentValue), getSelf());
+    Integer historicValue = getHistoricValue(msg.epochSeqNum);
+    if (historicValue != null) {
+      getSender().tell(new WriteOk(historicValue, msg.epochSeqNum), getSelf());
       String message = "received decision request from " +
-          getSender() +
-          decision.toString();
+        getSender();
       print(message);
     }
   }
 
+  private Integer getHistoricValue(EpochSeqNum esn){
+    for (Map.Entry<EpochSeqNum, Integer> entry :  updateHistory.entrySet()) {
+      EpochSeqNum key = entry.getKey();
+      if(key.epoch == esn.epoch && key.seqNum == esn.seqNum) {
+        return entry.getValue();
+      }
+    }
+    return null;
+  }
 }

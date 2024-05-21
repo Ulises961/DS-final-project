@@ -43,7 +43,9 @@ public class Cluster {
     ActorRef client = system.actorOf(Client.props(), "client");
     client.tell(start, ActorRef.noSender());
     
-    client.tell(new WriteDataMsg(1,client), client);
+    for(int i = 1; i < 3; i++){
+      client.tell(new WriteDataMsg(i,client), client);
+    }
     inputContinue();
 
     // system shutdown

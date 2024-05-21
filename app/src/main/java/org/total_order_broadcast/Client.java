@@ -7,16 +7,18 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import java.io.Serializable;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Iterator;
 
 public class Client extends Node {
 
     private ActorRef server = null;
     private HashSet<ActorRef> participants;
+    public static int nextReplica = 0;
+    public static int clientNumber = N_PARTICIPANTS + 1;
+    
 
     public Client(){
-        super(-1);
+        super(clientNumber++);
         this.participants = new HashSet<>();
     }
 
@@ -75,7 +77,11 @@ public class Client extends Node {
 
     public void assignServer(){
         Iterator<ActorRef> iterator = participants.iterator();
-        if(iterator.hasNext()) {
+        if (iterator.hasNext()) {
+            int randomIndex = (int) (Math.random() * participants.size());
+            for (int i = 0; i < randomIndex; i++) {
+                iterator.next();
+            }
             server = iterator.next();
         }
     }
@@ -89,7 +95,7 @@ public class Client extends Node {
     public void requestRead(){
         if(server != null){
             server.tell(new ReadDataMsg(),getSelf());
-            setTimeout(1000);
+            setTimeout(DECISION_TIMEOUT, new Timeout());
         }
     }
 
