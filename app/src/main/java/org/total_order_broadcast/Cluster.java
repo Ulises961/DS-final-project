@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.io.IOException;
 
 import org.total_order_broadcast.Node.JoinGroupMsg;
+import org.total_order_broadcast.Node.StartMessage;
+import org.total_order_broadcast.Node.WriteDataMsg;
 
 
 
@@ -20,21 +22,28 @@ public class Cluster {
     final ActorSystem system = ActorSystem.create("vssystem");
 
     // Create a "virtual synchrony coordinator" by default the coordinator is the node with max(ID)
-    ActorRef coordinator = system.actorOf(Replica.props(N_NODES, true), "vsmanager");
+    ActorRef coordinator = system.actorOf(Replica.props(N_NODES), "coordinator");
+    
     // Create nodes and put them to a list
     List<ActorRef> group = new ArrayList<>();
+
+    group.add(coordinator);
+    
     for (int i=N_NODES-1; i>-1; i--) {
-      group.add(system.actorOf(Replica.props(i, false), "replica-" + i));
+      group.add(system.actorOf(Replica.props(i), "replica-" + i));
     }
 
     // Send join messages to the coordinator and the nodes to inform them of the whole group
-    // TODO instantiate client
-    JoinGroupMsg start = new JoinGroupMsg(group);
-    coordinator.tell(start, ActorRef.noSender());
+    JoinGroupMsg start = new JoinGroupMsg(group, coordinator);
+    
     for (ActorRef peer: group) {
       peer.tell(start, ActorRef.noSender());
     }
 
+    ActorRef client = system.actorOf(Client.props(), "client");
+    client.tell(start, ActorRef.noSender());
+    
+    client.tell(new WriteDataMsg(1,client), client);
     inputContinue();
 
     // system shutdown

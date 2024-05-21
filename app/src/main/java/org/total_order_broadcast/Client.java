@@ -6,27 +6,50 @@ package org.total_order_broadcast;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import java.io.Serializable;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Iterator;
 
 public class Client extends Node {
 
+    private ActorRef server = null;
+    private HashSet<ActorRef> participants;
+
     public Client(){
-        super(-1,false);
+        super(-1);
+        this.participants = new HashSet<>();
     }
 
-    static public Props props(List<ActorRef> participants) {
+    static public Props props() {
         return Props.create(Client.class, Client::new);
     }
     public static class UpdateRequest implements Serializable{}
     public static class ReadResponse implements Serializable{}
-    public void onStartMessage(Node.StartMessage msg) {
+
+    
+    public void onStartMessage(JoinGroupMsg msg) {
         setGroup(msg);
+        this.coordinator = msg.coordinator;
+        assignServer();
     }
     // the current implementation sends an update message to a random replica
     // issue: the list of participants needs to be kept up to date wrt replicas that have crashed
-    public void onSendUpdate(SendUpdate update){
-        participants.get((int) (Math.random() * (N_PARTICIPANTS - 1))).tell(update,getSelf());
+    public void onSendUpdate(WriteDataMsg update){
+        if(server != null){
+            server.tell(new WriteDataMsg(update.value, getSelf()),getSelf());
+        }
     }
+
+    @Override
+    public void setGroup(JoinGroupMsg sm) {
+        for (ActorRef b : sm.group) {
+          if (!b.equals(getSelf())) {
+            // copying all participant refs except for self
+            this.participants.add(b);
+          }
+        }
+        print("starting with " + sm.group.size() + " peer(s)");
+      }
 
     @Override
     public void onRecovery(Recovery msg) {
@@ -50,8 +73,24 @@ public class Client extends Node {
         }
     }
 
-    public void onRequestRead(RequestRead req){
-        participants.get((int) (Math.random() * (N_PARTICIPANTS - 1))).tell(req,getSelf());
+    public void assignServer(){
+        Iterator<ActorRef> iterator = participants.iterator();
+        if(iterator.hasNext()) {
+            server = iterator.next();
+        }
+    }
+
+    public void onTimeout(Timeout msg) {
+        // client doesn't crash
+        participants.remove(server);
+        assignServer();
+    }
+
+    public void requestRead(){
+        if(server != null){
+            server.tell(new ReadDataMsg(),getSelf());
+            setTimeout(1000);
+        }
     }
 
     public void onReadResponse(ReadResponse res) {
@@ -60,9 +99,8 @@ public class Client extends Node {
         @Override
     public Receive createReceive() {
         return receiveBuilder()
-                .match(StartMessage.class,this::onStartMessage)
-                .match(SendUpdate.class,this::onSendUpdate)
-                .match(RequestRead.class, this::onRequestRead)
+                .match(JoinGroupMsg.class,this::onStartMessage)
+                .match(WriteDataMsg.class,this::onSendUpdate)
                 .match(ReadResponse.class, this::onReadResponse)
                 .build();
     }
