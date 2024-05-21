@@ -149,15 +149,17 @@ public abstract class Node extends AbstractActor {
   }
 
   public static class ReadDataMsg implements Serializable {
+    ActorRef sender;
+    public ReadDataMsg(ActorRef sender){
+      this.sender = sender;
+    }
   }
 
   public static class DataMsg implements Serializable {
     Integer value;
-    ActorRef sender;
 
-    public DataMsg(Integer value, ActorRef sender) {
+    public DataMsg(Integer value) {
       this.value = value;
-      this.sender = sender;
     }
   }
 
@@ -192,7 +194,7 @@ public abstract class Node extends AbstractActor {
   }
 
   public int getValue() {
-    return currentValue;
+    return currentValue != null ? currentValue : 0;
   }
 
   // abstract method to be implemented in extending classes

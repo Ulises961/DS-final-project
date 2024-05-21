@@ -48,7 +48,7 @@ public class Replica extends Node {
         .match(UpdateRequest.class, this::onUpdateRequest)
         .match(UpdateAck.class, this::onUpdateAck)
         .match(WriteOk.class, this::onWriteOk)
-        .match(Client.RequestRead.class, this::onRequestRead)
+        .match(RequestRead.class, this::onRequestRead)
         .match(DecisionRequest.class, this::onDecisionRequest)
         .build();
   }
@@ -97,7 +97,7 @@ public class Replica extends Node {
   }
 
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
-    getSender().tell(new DataMsg(getValue(), getSelf()), getSelf());
+    msg.sender.tell(new DataMsg(getValue()), getSelf());
   }
 
   public void onUpdateMessage(WriteDataMsg msg) { /* Value update from Client */

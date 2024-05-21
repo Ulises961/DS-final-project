@@ -4,10 +4,13 @@
 package org.total_order_broadcast;
 
 import akka.actor.ActorRef;
+import akka.actor.Cancellable;
 import akka.actor.Props;
 import java.io.Serializable;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
+import java.util.ArrayList;
 
 public class Client extends Node {
 
@@ -15,6 +18,7 @@ public class Client extends Node {
     private HashSet<ActorRef> participants;
     public static int nextReplica = 0;
     public static int clientNumber = N_PARTICIPANTS + 1;
+    private Cancellable readTimeout;
     
 
     public Client(){
@@ -26,7 +30,6 @@ public class Client extends Node {
         return Props.create(Client.class, Client::new);
     }
     public static class UpdateRequest implements Serializable{}
-    public static class ReadResponse implements Serializable{}
 
     
     public void onStartMessage(JoinGroupMsg msg) {
@@ -58,22 +61,7 @@ public class Client extends Node {
         // client doesn't crash
     }
 
-    public static class RequestRead{
-        EpochSeqNum epochSeqNum;
-        public RequestRead(){}
-
-        public RequestRead setEpochSeqNum(EpochSeqNum epochSeqNum){
-            this.epochSeqNum = epochSeqNum;
-            return this;
-        }
-
-        @Override
-        public String toString() {
-            return "RequestRead{" +
-                    "epochSeqNum=" + epochSeqNum +
-                    '}';
-        }
-    }
+    public static class RequestRead{}
 
     public void assignServer(){
         Iterator<ActorRef> iterator = participants.iterator();
@@ -92,22 +80,25 @@ public class Client extends Node {
         assignServer();
     }
 
-    public void requestRead(){
+    public void onRequestRead(RequestRead msg){
         if(server != null){
-            server.tell(new ReadDataMsg(),getSelf());
-            setTimeout(DECISION_TIMEOUT, new Timeout());
+            server.tell(new ReadDataMsg(getSelf()),getSelf());
+            readTimeout = setTimeout(DECISION_TIMEOUT, new Timeout());
         }
     }
 
-    public void onReadResponse(ReadResponse res) {
-        System.out.println("Client received:"+res);
+    public void onReadResponse(DataMsg res) {
+        System.out.println("Client received:"+res.value);
+        readTimeout.cancel();
     }
         @Override
     public Receive createReceive() {
         return receiveBuilder()
                 .match(JoinGroupMsg.class,this::onStartMessage)
                 .match(WriteDataMsg.class,this::onSendUpdate)
-                .match(ReadResponse.class, this::onReadResponse)
+                .match(DataMsg.class, this::onReadResponse)
+                .match(RequestRead.class, this::onRequestRead)
+                .match(Timeout.class, this::onTimeout)
                 .build();
     }
 
