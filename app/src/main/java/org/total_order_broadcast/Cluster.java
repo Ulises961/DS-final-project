@@ -10,7 +10,6 @@ import java.io.IOException;
 import org.total_order_broadcast.Client.RequestRead;
 import org.total_order_broadcast.Node.JoinGroupMsg;
 import org.total_order_broadcast.Node.WriteDataMsg;
-import org.total_order_broadcast.Node;
 
 public class Cluster {
 
