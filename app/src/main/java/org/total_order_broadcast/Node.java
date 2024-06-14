@@ -226,13 +226,12 @@ public abstract class Node extends AbstractActor {
   void crash(int recoverIn) {
     getContext().become(crashed());
     print("CRASH!!!");
+  }
 
-    // setting a timer to "recover"
-    getContext().system().scheduler().scheduleOnce(
-        Duration.create(recoverIn, TimeUnit.MILLISECONDS),
-        getSelf(),
-        new Recovery(), // message sent to myself
-        getContext().system().dispatcher(), getSelf());
+  public Receive crashed() {
+    return receiveBuilder()
+            .matchAny(msg -> {})
+            .build();
   }
 
   // emulate a delay of d milliseconds
