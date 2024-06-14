@@ -50,6 +50,9 @@ public class Replica extends Node {
         .match(WriteOk.class, this::onWriteOk)
         .match(RequestRead.class, this::onRequestRead)
         .match(DecisionRequest.class, this::onDecisionRequest)
+        .match(Heartbeat.class, this::onHeartbeat)
+        .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
+        .match(CoordinatorElection.class, this::onCoordinationElection)
         .build();
   }
 
@@ -72,6 +75,9 @@ public class Replica extends Node {
   public void onStartMessage(JoinGroupMsg msg) {
     setGroup(msg);
     this.coordinator = msg.coordinator;
+    if (isCoordinator()) {
+      multicast(new Heartbeat());
+    }
   }
 
   public void onUpdateRequest(UpdateRequest msg) {
@@ -118,6 +124,23 @@ public class Replica extends Node {
     multicast(new UpdateRequest(value, seqNum));
     setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(seqNum));
     System.out.println("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + seqNum);
+  }
+
+  public void onHeartbeat(Heartbeat msg) {
+    if (isCoordinator()) {
+      setTimeout(this.HEARTBEAT_INTERVAL, new Heartbeat());
+    } else {
+      setTimeout(this.HEARTBEAT_TIMEOUT, new HeartbeatTimeout());
+    }
+  }
+
+  public void onHeartbeatTimeout(HeartbeatTimeout msg) {
+    System.out.println("Coordinator is not responding. Starting election.");
+    multicast(new CoordinatorElection(this.id));
+  }
+
+  public void onCoordinationElection(CoordinatorElection msg) {
+    System.out.println("Election message received. Starting election.");
   }
 
   private boolean isCoordinator() {

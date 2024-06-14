@@ -53,6 +53,10 @@ public abstract class Node extends AbstractActor {
   // TODO missed updates message to bring replicas up to date, from the
   // coordinator
 
+  // Hearbeat timeout
+  protected final int HEARTBEAT_TIMEOUT = 1000;
+  protected final int HEARTBEAT_INTERVAL = 950;
+
   public Node(int id) {
     super();
     this.id = id;
@@ -163,6 +167,18 @@ public abstract class Node extends AbstractActor {
     }
   }
 
+  public static class CoordinatorElection implements Serializable {
+    Integer proposedCoordinatorId;
+
+    public CoordinatorElection(Integer proposedCoordinatorId) {
+      this.proposedCoordinatorId = proposedCoordinatorId;
+    }
+  }
+
+  public static class Heartbeat extends Timeout {}
+
+  public static class HeartbeatTimeout extends Timeout {}
+
   public static class WriteDataMsg implements Serializable {
     public final Integer value;
     ActorRef sender;
@@ -183,11 +199,9 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  public static class CrashMsg implements Serializable {
-  }
+  public static class CrashMsg implements Serializable {}
 
-  public static class RecoveryMsg implements Serializable {
-  }
+  public static class RecoveryMsg implements Serializable {}
 
   public void setValue(int value) {
     this.currentValue = value;
