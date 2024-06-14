@@ -293,13 +293,6 @@ public abstract class Node extends AbstractActor {
     return receiveBuilder().build();
   }
 
-  public Receive crashed() {
-    return receiveBuilder()
-        .match(Recovery.class, this::onRecovery)
-        .matchAny(msg -> {
-        })
-        .build();
-  }
 
   public void onDecisionRequest(DecisionRequest msg) { /* Decision Request */
     Integer historicValue = getHistoricValue(msg.epochSeqNum);
