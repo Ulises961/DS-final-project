@@ -11,7 +11,7 @@ import java.util.HashSet;
 import java.io.Serializable;
 
 import scala.concurrent.duration.Duration;
-
+import scala.util.Random;
 import akka.actor.*;
 
 public abstract class Node extends AbstractActor {
@@ -50,14 +50,23 @@ public abstract class Node extends AbstractActor {
   // group view flushes
   protected final Map<Integer, Set<ActorRef>> flushes;
 
+  // cancellation of the heartbeat timeout
   protected Cancellable heartbeatTimeout;
+
+  // to include delays in the messages
+  private Random rnd = new Random();
 
   // TODO missed updates message to bring replicas up to date, from the
   // coordinator
 
-  // Hearbeat timeout
+  // Hearbeat
   protected final int HEARTBEAT_TIMEOUT_DURATION = 2000;
   protected final int HEARTBEAT_INTERVAL = 1000;
+
+  final static int N_PARTICIPANTS = 3;
+  final static int VOTE_TIMEOUT = 500; // timeout for the votes, ms
+  final static int DECISION_TIMEOUT = 1000; // timeout for the decision, ms
+  final static int RANDOM_DELAY = VOTE_TIMEOUT + (VOTE_TIMEOUT / 2); // timeout for the decision, ms
 
   public Node(int id) {
     super();
@@ -77,9 +86,6 @@ public abstract class Node extends AbstractActor {
     this.quorum = currentView.size() / 2 + 1;
   }
 
-  final static int N_PARTICIPANTS = 3;
-  final static int VOTE_TIMEOUT = 1000; // timeout for the votes, ms
-  final static int DECISION_TIMEOUT = 2000; // timeout for the decision, ms
 
   // Start message that sends the list of participants to everyone
   public static class StartMessage implements Serializable {
@@ -156,7 +162,8 @@ public abstract class Node extends AbstractActor {
 
   public static class ReadDataMsg implements Serializable {
     ActorRef sender;
-    public ReadDataMsg(ActorRef sender){
+
+    public ReadDataMsg(ActorRef sender) {
       this.sender = sender;
     }
   }
@@ -186,13 +193,13 @@ public abstract class Node extends AbstractActor {
     public final boolean shouldCrash;
     ActorRef sender;
 
-    public WriteDataMsg(Integer value, ActorRef sender, boolean shouldCrash){
+    public WriteDataMsg(Integer value, ActorRef sender, boolean shouldCrash) {
       this.value = value;
       this.sender = sender;
       this.shouldCrash = shouldCrash;
     }
 
-    public WriteDataMsg(Integer value, ActorRef sender){
+    public WriteDataMsg(Integer value, ActorRef sender) {
       this.value = value;
       this.sender = sender;
       this.shouldCrash = false;
@@ -212,6 +219,11 @@ public abstract class Node extends AbstractActor {
   public static class CrashMsg implements Serializable {}
 
   public static class RecoveryMsg implements Serializable {}
+
+  public static class ICMPRequest implements Serializable {}
+  public static class ICMPResponse implements Serializable {}
+
+  public static class ICMPTimeout extends Timeout {}
 
   public void setValue(int value) {
     this.currentValue = value;
@@ -233,7 +245,7 @@ public abstract class Node extends AbstractActor {
   }
 
   // emulate a crash and a recovery in a given time
-  void crash(int recoverIn) {
+  void crash() {
     getContext().become(crashed());
     print("CRASH!!!");
   }
@@ -253,21 +265,33 @@ public abstract class Node extends AbstractActor {
   }
 
   void multicast(Serializable m) {
-    for (ActorRef p : participants)
+    for (ActorRef p : participants) {
+      try {
+        Thread.sleep(rnd.nextInt(RANDOM_DELAY));
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
       p.tell(m, getSelf());
+
+    }
   }
 
   // a multicast implementation that crashes after sending the first message
-  void multicastAndCrash(Serializable m, int recoverIn) {
+  void multicastAndCrash(Serializable m) {
     for (ActorRef p : participants) {
+      try {
+        Thread.sleep(rnd.nextInt(RANDOM_DELAY));
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
       p.tell(m, getSelf());
-      crash(recoverIn);
+      crash();
       return;
     }
   }
 
   // schedule a Timeout message in specified time
-  Cancellable setTimeout(int time, Timeout timeout) {
+  Cancellable setTimeout(int time, Serializable timeout) {
     return getContext().system().scheduler().scheduleOnce(
         Duration.create(time, TimeUnit.MILLISECONDS),
         getSelf(),
@@ -302,21 +326,20 @@ public abstract class Node extends AbstractActor {
     return receiveBuilder().build();
   }
 
-
   public void onDecisionRequest(DecisionRequest msg) { /* Decision Request */
     Integer historicValue = getHistoricValue(msg.epochSeqNum);
     if (historicValue != null) {
       getSender().tell(new WriteOk(historicValue, msg.epochSeqNum), getSelf());
       String message = "received decision request from " +
-        getSender();
+          getSender();
       print(message);
     }
   }
 
-  private Integer getHistoricValue(EpochSeqNum esn){
-    for (Map.Entry<EpochSeqNum, Integer> entry :  updateHistory.entrySet()) {
+  private Integer getHistoricValue(EpochSeqNum esn) {
+    for (Map.Entry<EpochSeqNum, Integer> entry : updateHistory.entrySet()) {
       EpochSeqNum key = entry.getKey();
-      if(key.epoch == esn.epoch && key.seqNum == esn.seqNum) {
+      if (key.epoch == esn.epoch && key.seqNum == esn.seqNum) {
         return entry.getValue();
       }
     }

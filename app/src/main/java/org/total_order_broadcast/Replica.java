@@ -53,6 +53,7 @@ public class Replica extends Node {
         .match(Heartbeat.class, this::onHeartbeat)
         .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
         .match(CoordinatorElection.class, this::onCoordinationElection)
+        .match(ICMPRequest.class, this::onPing)
         .build();
   }
 
@@ -150,6 +151,11 @@ public class Replica extends Node {
 
   public void onCoordinationElection(CoordinatorElection msg) {
     System.out.println("Election message received. Starting election.");
+  }
+
+  public void onPing(ICMPRequest msg) {
+    System.out.println("Received ping from " + getSender().path().name());
+    getSender().tell(new ICMPResponse(), getSelf());
   }
 
   private boolean isCoordinator() {

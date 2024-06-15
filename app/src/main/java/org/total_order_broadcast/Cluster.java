@@ -102,22 +102,22 @@ public class Cluster {
             client = clients.get(clientId);
             client.tell(new WriteDataMsg(updateValue++, client), client);
             break;
-            case 2:
+          case 2:
             clientId = readInput(in, clientNames);
             if (clientId == -1) break;
             client = clients.get(clientId);
             client.tell(new RequestRead(), client);
             break;
-            case 3:
+          case 3:
             replicaId = readInput(in, replicaNames);
             if (replicaId == -1) break;
             replica = group.get(replicaId);
             replica.tell(new CrashMsg(), replica);
             break;
-            case 4:
+          case 4:
             group.get(0).tell(new CrashMsg(), group.get(0));
             break;
-            case 5:
+          case 5:
             clientId = readInput(in, clientNames);
             if (clientId == -1) break;
             client = clients.get(clientId);

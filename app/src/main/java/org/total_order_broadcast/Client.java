@@ -3,12 +3,13 @@
  */
 package org.total_order_broadcast;
 
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import akka.actor.Props;
-import java.io.Serializable;
-import java.util.HashSet;
-import java.util.Iterator;
 
 public class Client extends Node {
 
@@ -17,7 +18,9 @@ public class Client extends Node {
     public static int nextReplica = 0;
     public static int clientNumber = N_PARTICIPANTS + 1;
     private Cancellable readTimeout;
-    
+    private Cancellable serverLivenessTimeout;
+    private LinkedList<UpdateRequest> updates = new LinkedList<>();
+    private boolean checkingServer = false;
 
     public Client(){
         super(clientNumber++);
@@ -27,7 +30,12 @@ public class Client extends Node {
     static public Props props() {
         return Props.create(Client.class, Client::new);
     }
-    public static class UpdateRequest implements Serializable{}
+
+    public static class UpdateRequest extends WriteDataMsg {
+        public UpdateRequest(Integer value, ActorRef sender, boolean shouldCrash){
+            super(value, sender, shouldCrash);
+        }
+    }
 
     
     public void onStartMessage(JoinGroupMsg msg) {
@@ -35,12 +43,12 @@ public class Client extends Node {
         this.coordinator = msg.coordinator;
         assignServer();
     }
-    // the current implementation sends an update message to a random replica
-    // issue: the list of participants needs to be kept up to date wrt replicas that have crashed
+
     public void onSendUpdate(WriteDataMsg update){
-        if(server != null){
-            server.tell(new WriteDataMsg(update.value, getSelf()),getSelf());
-        }
+        // First check server is alive, 
+        // on ping response send update, otherwise choose another server and retry
+        updates.add(new UpdateRequest(update.value,update.sender, update.shouldCrash));
+        pingServer();
     }
 
     @Override
@@ -73,7 +81,6 @@ public class Client extends Node {
     }
 
     public void onTimeout(Timeout msg) {
-        // client doesn't crash
         participants.remove(server);
         assignServer();
     }
@@ -89,7 +96,31 @@ public class Client extends Node {
         System.out.println("Client received:"+res.value);
         readTimeout.cancel();
     }
-        @Override
+
+    public void onPong(ICMPResponse msg){
+        checkingServer = false;
+        serverLivenessTimeout.cancel();
+        if(server != null){
+            server.tell(updates.poll(),getSelf());
+        }
+    }
+
+    public void ICMPTimeout(ICMPTimeout msg){
+        checkingServer = false;
+        participants.remove(server);
+        assignServer();
+        pingServer();
+    }
+
+    private void pingServer(){
+        server.tell(new ICMPRequest(),getSelf());
+        if(!checkingServer){
+            serverLivenessTimeout = setTimeout(DECISION_TIMEOUT, new ICMPTimeout());
+            checkingServer = true;
+        }
+    }
+
+    @Override
     public Receive createReceive() {
         return receiveBuilder()
                 .match(JoinGroupMsg.class,this::onStartMessage)
@@ -97,6 +128,8 @@ public class Client extends Node {
                 .match(DataMsg.class, this::onReadResponse)
                 .match(RequestRead.class, this::onRequestRead)
                 .match(Timeout.class, this::onTimeout)
+                .match(ICMPResponse.class, this::onPong)
+                .match(ICMPTimeout.class, this::ICMPTimeout)
                 .build();
     }
 
