@@ -181,11 +181,19 @@ public abstract class Node extends AbstractActor {
 
   public static class WriteDataMsg implements Serializable {
     public final Integer value;
+    public final boolean shouldCrash;
     ActorRef sender;
 
-    public WriteDataMsg(Integer value, ActorRef sender) {
+    public WriteDataMsg(Integer value, ActorRef sender, boolean shouldCrash){
       this.value = value;
       this.sender = sender;
+      this.shouldCrash = shouldCrash;
+    }
+
+    public WriteDataMsg(Integer value, ActorRef sender){
+      this.value = value;
+      this.sender = sender;
+      this.shouldCrash = false;
     }
   }
 
