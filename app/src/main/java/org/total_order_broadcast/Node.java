@@ -50,12 +50,14 @@ public abstract class Node extends AbstractActor {
   // group view flushes
   protected final Map<Integer, Set<ActorRef>> flushes;
 
+  protected Cancellable heartbeatTimeout;
+
   // TODO missed updates message to bring replicas up to date, from the
   // coordinator
 
   // Hearbeat timeout
-  protected final int HEARTBEAT_TIMEOUT = 1000;
-  protected final int HEARTBEAT_INTERVAL = 950;
+  protected final int HEARTBEAT_TIMEOUT_DURATION = 1000;
+  protected final int HEARTBEAT_INTERVAL = 500;
 
   public Node(int id) {
     super();

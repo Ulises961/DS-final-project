@@ -128,14 +128,18 @@ public class Replica extends Node {
 
   public void onHeartbeat(Heartbeat msg) {
     if (isCoordinator()) {
+      multicast(new Heartbeat());
       setTimeout(this.HEARTBEAT_INTERVAL, new Heartbeat());
     } else {
-      setTimeout(this.HEARTBEAT_TIMEOUT, new HeartbeatTimeout());
+      if(this.heartbeatTimeout != null) {
+        this.heartbeatTimeout.cancel();
+      }
+      heartbeatTimeout = setTimeout(this.HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
     }
   }
 
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
-    System.out.println("Coordinator is not responding. Starting election.");
+    System.out.println("Coordinator is not responding. Starting election." + self().path().name());
     multicast(new CoordinatorElection(this.id));
   }
 
