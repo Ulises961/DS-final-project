@@ -96,7 +96,7 @@ public class Cluster {
         switch (input) {
           case 0:
             System.out.println("Exiting...");
-            System.exit(0);
+            exit = true;
             break;
           case 1:
             clientId = readInput(in, clientNames);
@@ -137,7 +137,7 @@ public class Cluster {
       }
 
       try {
-        TimeUnit.SECONDS.sleep(1);
+        TimeUnit.SECONDS.sleep(2);
       } catch (InterruptedException e) {
         e.printStackTrace();
       }
@@ -153,25 +153,20 @@ public class Cluster {
       System.out.println("[" + i + "] - " + actions[i]);
     }
 
-    try {
-      if(in.hasNextInt()) {
-
-        int value = in.nextInt();
-
-        while (value < 0 || value > actions.length - 1) {
-          System.out.println("Invalid menu item, please try again");
-          if(in.hasNextInt()){
+    int value = -1; // Default to an invalid value
+    while (value < 0 || value >= actions.length) {
+        if (in.hasNextInt()) {
             value = in.nextInt();
-          }
+            if (value >= 0 && value < actions.length) {
+                break; // Valid input, exit the loop
+            } else {
+                System.out.println("Invalid menu item, please try again");
+            }
+        } else {
+            System.out.println("Please enter a valid integer");
+            in.next(); // Consume the invalid input
         }
-        return value;
-      } else {
-        in.nextLine();
-        return -1;
-      }
-    } catch (Exception e) {
-      System.err.println("Input error " + e.getMessage());
-      }
-    return -1;
+    }
+    return value;
   }
 }
