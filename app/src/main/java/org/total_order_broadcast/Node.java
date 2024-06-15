@@ -66,7 +66,7 @@ public abstract class Node extends AbstractActor {
   final static int N_PARTICIPANTS = 3;
   final static int VOTE_TIMEOUT = 500; // timeout for the votes, ms
   final static int DECISION_TIMEOUT = 1000; // timeout for the decision, ms
-  final static int RANDOM_DELAY = VOTE_TIMEOUT + (VOTE_TIMEOUT / 2); // timeout for the decision, ms
+  final static int RANDOM_DELAY = Math.round((VOTE_TIMEOUT + 50) / N_PARTICIPANTS); // timeout for the decision, ms
 
   public Node(int id) {
     super();

@@ -123,6 +123,7 @@ public class Cluster {
             client = clients.get(clientId);
             boolean shouldCrash = true;
             client.tell(new WriteDataMsg(updateValue++, client, shouldCrash), client);
+          // TODO add test for concurrent updates
           default:
             break;
         }

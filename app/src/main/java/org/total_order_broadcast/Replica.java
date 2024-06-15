@@ -89,6 +89,9 @@ public class Replica extends Node {
       expectingAcks = true;
       coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
       setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
+
+      // Assume the heartbeat is received
+      renewHeartbeatTimeout();
   }
 
   public void onTimeout(UpdateTimeOut msg) {
@@ -101,6 +104,9 @@ public class Replica extends Node {
   public void onWriteOk(WriteOk msg) {
     // store the decision
     fixDecision(msg.value, msg.epochSeqNum);
+
+    // Assume the heartbeat is received
+    renewHeartbeatTimeout();
   }
 
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
@@ -134,13 +140,10 @@ public class Replica extends Node {
       if(this.heartbeatTimeout != null) {
         this.heartbeatTimeout.cancel();
       }
-      heartbeatTimeout = setTimeout(this.HEARTBEAT_TIMEOUT_DURATION, new Heartbeat());
+      heartbeatTimeout = setTimeout(this.HEARTBEAT_INTERVAL, new Heartbeat());
 
     } else {
-      if(this.heartbeatTimeout != null) {
-        this.heartbeatTimeout.cancel();
-      }
-      heartbeatTimeout = setTimeout(this.HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
+      renewHeartbeatTimeout();
     }
   }
 
@@ -164,5 +167,12 @@ public class Replica extends Node {
       return false;
     }
     return coordinator.equals(getSelf());
+  }
+
+  private void renewHeartbeatTimeout(){
+    if(this.heartbeatTimeout != null) {
+      this.heartbeatTimeout.cancel();
+    }
+    heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
   }
 }
