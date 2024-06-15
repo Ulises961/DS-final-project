@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit;
 public class Cluster {
 
   public static void main(String[] args) {
-    
+
     // Create the actor system
     final ActorSystem system = ActorSystem.create("vssystem");
 
@@ -53,8 +53,8 @@ public class Cluster {
     client_2.tell(start, ActorRef.noSender());
 
     // for (int i = 1; i < 3; i++) {
-    //   client_1.tell(new WriteDataMsg(i, client_1), client_1);
-    //   client_2.tell(new RequestRead(), client_2);
+    // client_1.tell(new WriteDataMsg(i, client_1), client_1);
+    // client_2.tell(new RequestRead(), client_2);
     // }
     try {
       TimeUnit.SECONDS.sleep(1);
@@ -63,8 +63,6 @@ public class Cluster {
     }
 
     inputContinue(clients, group);
-    // client_2.tell(new RequestRead(), client_2);
-    // client_1.tell(new RequestRead(), client_1);
 
     // system shutdown
     system.terminate();
@@ -82,91 +80,98 @@ public class Cluster {
     String[] replicaNames = group.stream().map(node -> node.path().name()).toArray(String[]::new);
     Scanner in = new Scanner(System.in);
 
-    while(!exit){
+    while (!exit) {
 
       try {
         String[] actions = {
-          "Exit", 
-          "Update", 
-          "Read", 
-          "Crash", 
-          "Crash coordinator", 
-          "Update and crash"};
-    
-        input = readInput(in,actions);
-          
+            "Exit",
+            "Update",
+            "Read",
+            "Crash",
+            "Crash coordinator",
+            "Update and crash" };
+
+        input = readInput(in, actions);
+
         switch (input) {
           case 0:
             System.out.println("Exiting...");
             System.exit(0);
             break;
           case 1:
-            clientId = readInput(in,clientNames);
+            clientId = readInput(in, clientNames);
+            if (clientId == -1) break;
             client = clients.get(clientId);
             client.tell(new WriteDataMsg(updateValue++, client), client);
             break;
-          case 2:
-            clientId = readInput(in,clientNames);
+            case 2:
+            clientId = readInput(in, clientNames);
+            if (clientId == -1) break;
             client = clients.get(clientId);
             client.tell(new RequestRead(), client);
             break;
-          case 3:
-            replicaId = readInput(in,replicaNames);
+            case 3:
+            replicaId = readInput(in, replicaNames);
+            if (replicaId == -1) break;
             replica = group.get(replicaId);
             replica.tell(new CrashMsg(), replica);
             break;
-          case 4:
+            case 4:
             group.get(0).tell(new CrashMsg(), group.get(0));
             break;
-          case 5:
-            clientId = readInput(in,clientNames);
+            case 5:
+            clientId = readInput(in, clientNames);
+            if (clientId == -1) break;
             client = clients.get(clientId);
             boolean shouldCrash = true;
             client.tell(new WriteDataMsg(updateValue++, client, shouldCrash), client);
           default:
             break;
         }
-  
-        
-      } catch (Exception ignored) { 
+
+      } catch (Exception ignored) {
         System.err.println(ignored.getMessage());
         System.out.println("Invalid input, please try again.");
         System.exit(-1);
         input = 0;
-      } 
-           
+      }
+
       try {
         TimeUnit.SECONDS.sleep(1);
       } catch (InterruptedException e) {
         e.printStackTrace();
       }
-    }    
+    }
     in.close();
   }
 
   private static int readInput(Scanner in, String[] actions) {
-    System.out.println("\n#########\n");  
+    System.out.println("\n#########\n");
     System.out.println("Please select menu item");
     System.out.println(">>> Choose action <<<");
-
     for (int i = 0; i < actions.length; i++) {
-      System.out.println("["+ i + "] - " + actions[i]);
-    }    
-    
-    try {
-      int value = in.nextInt();
-    
-      while (value < 0 || value > actions.length - 1) {
-        System.out.println("Invalid menu item, please try again");
-        // java.util.InputMismatchException should also be caught 
-        // to intercept non-numeric input
-        value = in.nextInt();
-      }
+      System.out.println("[" + i + "] - " + actions[i]);
+    }
 
-      return value; 
+    try {
+      if(in.hasNextInt()) {
+
+        int value = in.nextInt();
+
+        while (value < 0 || value > actions.length - 1) {
+          System.out.println("Invalid menu item, please try again");
+          if(in.hasNextInt()){
+            value = in.nextInt();
+          }
+        }
+        return value;
+      } else {
+        in.nextLine();
+        return -1;
+      }
     } catch (Exception e) {
-      System.err.println(e.getMessage());
-    } 
+      System.err.println("Input error " + e.getMessage());
+      }
     return -1;
   }
 }
