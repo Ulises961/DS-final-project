@@ -129,7 +129,12 @@ public class Replica extends Node {
   public void onHeartbeat(Heartbeat msg) {
     if (isCoordinator()) {
       multicast(new Heartbeat());
-      setTimeout(this.HEARTBEAT_INTERVAL, new Heartbeat());
+      
+      if(this.heartbeatTimeout != null) {
+        this.heartbeatTimeout.cancel();
+      }
+      heartbeatTimeout = setTimeout(this.HEARTBEAT_TIMEOUT_DURATION, new Heartbeat());
+
     } else {
       if(this.heartbeatTimeout != null) {
         this.heartbeatTimeout.cancel();

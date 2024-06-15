@@ -56,8 +56,8 @@ public abstract class Node extends AbstractActor {
   // coordinator
 
   // Hearbeat timeout
-  protected final int HEARTBEAT_TIMEOUT_DURATION = 1000;
-  protected final int HEARTBEAT_INTERVAL = 500;
+  protected final int HEARTBEAT_TIMEOUT_DURATION = 2000;
+  protected final int HEARTBEAT_INTERVAL = 1000;
 
   public Node(int id) {
     super();

@@ -5,18 +5,19 @@ import akka.actor.ActorSystem;
 
 import java.util.List;
 import java.util.ArrayList;
-import java.io.IOException;
+import java.util.Scanner;
+import java.util.concurrent.TimeUnit;
 
 import org.total_order_broadcast.Client.RequestRead;
 import org.total_order_broadcast.Node.CrashMsg;
 import org.total_order_broadcast.Node.JoinGroupMsg;
 import org.total_order_broadcast.Node.WriteDataMsg;
-import java.util.Scanner;
-import java.util.concurrent.TimeUnit;
 
 public class Cluster {
 
   public static void main(String[] args) {
+
+    Scanner in = new Scanner(System.in);
 
     // Create the actor system
     final ActorSystem system = ActorSystem.create("vssystem");
@@ -52,23 +53,21 @@ public class Cluster {
 
     client_2.tell(start, ActorRef.noSender());
 
-    // for (int i = 1; i < 3; i++) {
-    // client_1.tell(new WriteDataMsg(i, client_1), client_1);
-    // client_2.tell(new RequestRead(), client_2);
-    // }
     try {
       TimeUnit.SECONDS.sleep(1);
     } catch (InterruptedException e) {
       e.printStackTrace();
     }
 
-    inputContinue(clients, group);
+    inputContinue(in, clients, group);
 
     // system shutdown
     system.terminate();
+    in.close();
+
   }
 
-  public static void inputContinue(List<ActorRef> clients, List<ActorRef> group) {
+  public static void inputContinue(Scanner in, List<ActorRef> clients, List<ActorRef> group) {
     boolean exit = false;
     int updateValue = 1;
     int clientId = 0;
@@ -78,7 +77,6 @@ public class Cluster {
     ActorRef client;
     String[] clientNames = clients.stream().map(c -> c.path().name()).toArray(String[]::new);
     String[] replicaNames = group.stream().map(node -> node.path().name()).toArray(String[]::new);
-    Scanner in = new Scanner(System.in);
 
     while (!exit) {
 
@@ -137,12 +135,11 @@ public class Cluster {
       }
 
       try {
-        TimeUnit.SECONDS.sleep(2);
+        TimeUnit.SECONDS.sleep(1);
       } catch (InterruptedException e) {
         e.printStackTrace();
       }
     }
-    in.close();
   }
 
   private static int readInput(Scanner in, String[] actions) {
