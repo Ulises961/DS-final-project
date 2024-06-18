@@ -1,9 +1,13 @@
 package org.total_order_broadcast;
 
 import akka.actor.*;
+import scala.util.Random;
 
 import java.io.Serializable;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import org.total_order_broadcast.Client.RequestRead;
 
@@ -14,10 +18,54 @@ public class Replica extends Node {
   EpochSeqNum proposedEpochSeqNum;
   private boolean expectingAcks = false;
 
+  protected int quorum;
+
+  protected Integer currentValue;
+
+  // participants (initial group, current and proposed views)
+  protected final Set<ActorRef> group;
+
+  protected final Set<ActorRef> currentView;
+
+  // each view has is assocaited w/ an Epoch
+  protected final Map<EpochSeqNum, Set<ActorRef>> proposedView;
+
+  // last sequence number for each node message (to avoid delivering duplicates)
+  protected final Map<ActorRef, Integer> membersSeqno;
+
+  // history of updates
+  protected final Map<EpochSeqNum, Integer> updateHistory;
+
+  // deferred messages (of a future view)
+  protected final Set<WriteDataMsg> deferredMsgSet;
+
+  // group view flushes
+  protected final Map<Integer, Set<ActorRef>> flushes;
+
+  // cancellation of the heartbeat timeout
+  protected Cancellable heartbeatTimeout;
+
+  // to include delays in the messages
+  private Random rnd = new Random();
+  // dedicated class to keep track of epoch and seqNum pairs :)
+  protected EpochSeqNum epochSeqNumPair;
+
+
   public Replica(int id) {
     super(id);
     this.receivedAcks = new HashSet<>();
+    this.quorum = (N_PARTICIPANTS / 2) + 1;
+    this.epochSeqNumPair = new EpochSeqNum(0, 0);
+    this.group = new HashSet<>();
+    this.currentView = new HashSet<>();
+    this.proposedView = new HashMap<>();
+    this.membersSeqno = new HashMap<>();
+    this.updateHistory = new HashMap<>();
+    this.deferredMsgSet = new HashSet<>();
+    this.flushes = new HashMap<>();
+
     System.out.println("Replica " + id + " created");
+
   }
 
   @Override
@@ -57,6 +105,19 @@ public class Replica extends Node {
         .build();
   }
 
+  private void updateQuorum() {
+    this.quorum = currentView.size() / 2 + 1;
+  }
+
+  public void setValue(int value) {
+    this.currentValue = value;
+  }
+
+  public int getValue() {
+    return currentValue != null ? currentValue : 0;
+  }
+
+
   public void onRequestRead(RequestRead msg) {
     getSender().tell(currentValue, getSelf());
   }
@@ -84,20 +145,20 @@ public class Replica extends Node {
   public void onUpdateRequest(UpdateRequest msg) {
     // if (id==2) {crash(5000); return;} // simulate a crash
     // if (id==2) delay(4000); // simulate a delay
-    
-    // Updates must be monotonically increasing within the latest epoch 
-      expectingAcks = true;
-      coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
-      setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
 
-      // Assume the heartbeat is received
-      renewHeartbeatTimeout();
+    // Updates must be monotonically increasing within the latest epoch
+    expectingAcks = true;
+    coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
+    setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
+
+    // Assume the heartbeat is received
+    renewHeartbeatTimeout();
   }
 
   public void onTimeout(UpdateTimeOut msg) {
     if (!hasDecided(msg.epochSeqNum)) {
-        multicast(new DecisionRequest(msg.epochSeqNum));
-        setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
+      multicast(new DecisionRequest(msg.epochSeqNum));
+      setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
     }
   }
 
@@ -127,6 +188,60 @@ public class Replica extends Node {
     }
   }
 
+  public void onDecisionRequest(DecisionRequest msg) { /* Decision Request */
+    Integer historicValue = getHistoricValue(msg.epochSeqNum);
+    if (historicValue != null) {
+      getSender().tell(new WriteOk(historicValue, msg.epochSeqNum), getSelf());
+      String message = "received decision request from " +
+          getSender();
+      print(message);
+    }
+  }
+
+  private Integer getHistoricValue(EpochSeqNum esn) {
+    for (Map.Entry<EpochSeqNum, Integer> entry : updateHistory.entrySet()) {
+      EpochSeqNum key = entry.getKey();
+      if (key.epoch == esn.epoch && key.seqNum == esn.seqNum) {
+        return entry.getValue();
+      }
+    }
+    return null;
+  }
+
+  public void multicast(Serializable m) {
+    for (ActorRef p : participants) {
+      delay(rnd.nextInt(RANDOM_DELAY));
+      p.tell(m, getSelf());
+
+    }
+  }
+
+  // a multicast implementation that crashes after sending the first message
+  public void multicastAndCrash(Serializable m) {
+    for (ActorRef p : participants) {
+      delay(rnd.nextInt(RANDOM_DELAY));
+      p.tell(m, getSelf());
+      crash();
+      return;
+    }
+  }
+
+
+  // fix the final decision of the current node
+  public void fixDecision(Integer v, EpochSeqNum epochSeqNum) {
+    if (!hasDecided(epochSeqNum)) {
+      currentValue = v;
+      updateHistory.put(epochSeqNum, v);
+
+      print("Fixing value " + currentValue);
+      print("Update History " + updateHistory.toString());
+    }
+  }
+
+  boolean hasDecided(EpochSeqNum epochSeqNum) {
+    return this.updateHistory.get(epochSeqNum) != null;
+  } // has the node decided?
+
   private void requestUpdate(Integer value, EpochSeqNum seqNum) {
     multicast(new UpdateRequest(value, seqNum));
     setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(seqNum));
@@ -136,8 +251,8 @@ public class Replica extends Node {
   public void onHeartbeat(Heartbeat msg) {
     if (isCoordinator()) {
       multicast(new Heartbeat());
-      
-      if(this.heartbeatTimeout != null) {
+
+      if (this.heartbeatTimeout != null) {
         this.heartbeatTimeout.cancel();
       }
       heartbeatTimeout = setTimeout(this.HEARTBEAT_INTERVAL, new Heartbeat());
@@ -169,8 +284,8 @@ public class Replica extends Node {
     return coordinator.equals(getSelf());
   }
 
-  private void renewHeartbeatTimeout(){
-    if(this.heartbeatTimeout != null) {
+  private void renewHeartbeatTimeout() {
+    if (this.heartbeatTimeout != null) {
       this.heartbeatTimeout.cancel();
     }
     heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());

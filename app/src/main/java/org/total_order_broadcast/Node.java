@@ -1,64 +1,35 @@
 package org.total_order_broadcast;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.io.Serializable;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
+import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
+import akka.actor.Cancellable;
 import scala.concurrent.duration.Duration;
-import scala.util.Random;
-import akka.actor.*;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 
 public abstract class Node extends AbstractActor {
-
+  protected static final Logger LOGGER = LoggerFactory.getLogger(Node.class);
+  
   protected int id; // node ID
 
   protected List<ActorRef> participants; // list of participant nodes
 
-  protected int quorum;
 
-  protected Integer currentValue;
-
-  // dedicated class to keep track of epoch and seqNum pairs :)
-  protected EpochSeqNum epochSeqNumPair;
-
-  // whether the node should join through the manager
-  protected ActorRef coordinator;
-
-  // participants (initial group, current and proposed views)
-  protected final Set<ActorRef> group;
-
-  protected final Set<ActorRef> currentView;
-
-  // each view has is assocaited w/ an Epoch
-  protected final Map<EpochSeqNum, Set<ActorRef>> proposedView;
-
-  // last sequence number for each node message (to avoid delivering duplicates)
-  protected final Map<ActorRef, Integer> membersSeqno;
-
-  // history of updates
-  protected final Map<EpochSeqNum, Integer> updateHistory;
-
-  // deferred messages (of a future view)
-  protected final Set<WriteDataMsg> deferredMsgSet;
-
-  // group view flushes
-  protected final Map<Integer, Set<ActorRef>> flushes;
-
-  // cancellation of the heartbeat timeout
-  protected Cancellable heartbeatTimeout;
-
-  // to include delays in the messages
-  private Random rnd = new Random();
 
   // TODO missed updates message to bring replicas up to date, from the
   // coordinator
 
+  protected ActorRef coordinator;
   // Hearbeat
   protected final int HEARTBEAT_TIMEOUT_DURATION = 2000;
   protected final int HEARTBEAT_INTERVAL = 1000;
@@ -71,21 +42,7 @@ public abstract class Node extends AbstractActor {
   public Node(int id) {
     super();
     this.id = id;
-    this.epochSeqNumPair = new EpochSeqNum(0, 0);
-    this.group = new HashSet<>();
-    this.currentView = new HashSet<>();
-    this.proposedView = new HashMap<>();
-    this.membersSeqno = new HashMap<>();
-    this.updateHistory = new HashMap<>();
-    this.deferredMsgSet = new HashSet<>();
-    this.flushes = new HashMap<>();
-    this.quorum = (N_PARTICIPANTS / 2) + 1;
   }
-
-  private void updateQuorum() {
-    this.quorum = currentView.size() / 2 + 1;
-  }
-
 
   // Start message that sends the list of participants to everyone
   public static class StartMessage implements Serializable {
@@ -225,13 +182,6 @@ public abstract class Node extends AbstractActor {
 
   public static class ICMPTimeout extends Timeout {}
 
-  public void setValue(int value) {
-    this.currentValue = value;
-  }
-
-  public int getValue() {
-    return currentValue != null ? currentValue : 0;
-  }
 
   // abstract method to be implemented in extending classes
   protected abstract void onRecovery(Recovery msg);
@@ -242,6 +192,7 @@ public abstract class Node extends AbstractActor {
       this.participants.add(b);
     }
     print("Starting with " + sm.group.size() + " peer(s)");
+    LOGGER.info("This is an INFO level log message");
   }
 
   // emulate a crash and a recovery in a given time
@@ -264,32 +215,6 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  void multicast(Serializable m) {
-    for (ActorRef p : participants) {
-      try {
-        Thread.sleep(rnd.nextInt(RANDOM_DELAY));
-      } catch (InterruptedException e) {
-        e.printStackTrace();
-      }
-      p.tell(m, getSelf());
-
-    }
-  }
-
-  // a multicast implementation that crashes after sending the first message
-  void multicastAndCrash(Serializable m) {
-    for (ActorRef p : participants) {
-      try {
-        Thread.sleep(rnd.nextInt(RANDOM_DELAY));
-      } catch (InterruptedException e) {
-        e.printStackTrace();
-      }
-      p.tell(m, getSelf());
-      crash();
-      return;
-    }
-  }
-
   // schedule a Timeout message in specified time
   Cancellable setTimeout(int time, Serializable timeout) {
     return getContext().system().scheduler().scheduleOnce(
@@ -299,20 +224,6 @@ public abstract class Node extends AbstractActor {
         getContext().system().dispatcher(), getSelf());
   }
 
-  // fix the final decision of the current node
-  void fixDecision(Integer v, EpochSeqNum epochSeqNum) {
-    if (!hasDecided(epochSeqNum)) {
-      currentValue = v;
-      updateHistory.put(epochSeqNum, v);
-
-      print("Fixing value " + currentValue);
-      print("Update History " + updateHistory.toString());
-    }
-  }
-
-  boolean hasDecided(EpochSeqNum epochSeqNum) {
-    return this.updateHistory.get(epochSeqNum) != null;
-  } // has the node decided?
 
   // a simple logging function
   void print(String s) {
@@ -325,24 +236,5 @@ public abstract class Node extends AbstractActor {
     // Empty mapping: we'll define it in the inherited classes
     return receiveBuilder().build();
   }
-
-  public void onDecisionRequest(DecisionRequest msg) { /* Decision Request */
-    Integer historicValue = getHistoricValue(msg.epochSeqNum);
-    if (historicValue != null) {
-      getSender().tell(new WriteOk(historicValue, msg.epochSeqNum), getSelf());
-      String message = "received decision request from " +
-          getSender();
-      print(message);
-    }
-  }
-
-  private Integer getHistoricValue(EpochSeqNum esn) {
-    for (Map.Entry<EpochSeqNum, Integer> entry : updateHistory.entrySet()) {
-      EpochSeqNum key = entry.getKey();
-      if (key.epoch == esn.epoch && key.seqNum == esn.seqNum) {
-        return entry.getValue();
-      }
-    }
-    return null;
-  }
+ 
 }
