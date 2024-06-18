@@ -5,3 +5,5 @@
 build
 #Ignore intellijIdea files
 .idea/
+bin/
+.vscode/

@@ -15,7 +15,8 @@ def versions = [
         ScalaBinary: "2.13",
         AkkaVersion: "2.9.0",
         LogBackVersion: "1.2.3",
-        JunitVersion: "4.13.1"
+        JunitVersion: "4.13.1",
+        SLF4JVersion: "1.7.32"
 ]
 
 dependencies {
@@ -25,6 +26,7 @@ dependencies {
     testImplementation "com.typesafe.akka:akka-actor-testkit-typed_${versions.ScalaBinary}:${versions.AkkaVersion}"
     testImplementation "junit:junit:${versions.JunitVersion}"
     implementation "ch.qos.logback:logback-classic:${versions.LogBackVersion}"
+    implementation "org.slf4j:slf4j-api:${versions.SLF4JVersion}"
 }
 
 compileJava {

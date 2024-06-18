@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.total_order_broadcast.Client.RequestRead;
 import org.total_order_broadcast.Node.CrashMsg;
@@ -87,43 +88,60 @@ public class Cluster {
             "Read",
             "Crash",
             "Crash coordinator",
-            "Update and crash" };
+            "Update and crash",
+            "Concurrent updates"
+          };
 
         input = readInput(in, actions);
 
         switch (input) {
           case 0:
+            // Exit
             System.out.println("Exiting...");
             exit = true;
             break;
           case 1:
+            // Client update value
             clientId = readInput(in, clientNames);
             if (clientId == -1) break;
             client = clients.get(clientId);
             client.tell(new WriteDataMsg(updateValue++, client), client);
             break;
           case 2:
+            // Client read latest value
             clientId = readInput(in, clientNames);
             if (clientId == -1) break;
             client = clients.get(clientId);
             client.tell(new RequestRead(), client);
             break;
           case 3:
+            // Crash replica
             replicaId = readInput(in, replicaNames);
             if (replicaId == -1) break;
             replica = group.get(replicaId);
             replica.tell(new CrashMsg(), replica);
             break;
           case 4:
+            // Crash coordinator
             group.get(0).tell(new CrashMsg(), group.get(0));
             break;
           case 5:
+            // Update and crash
             clientId = readInput(in, clientNames);
             if (clientId == -1) break;
             client = clients.get(clientId);
             boolean shouldCrash = true;
             client.tell(new WriteDataMsg(updateValue++, client, shouldCrash), client);
-          // TODO add test for concurrent updates
+          case 6:
+            // Concurrent updates
+            int clientId1 = readInput(in, clientNames);
+            String[] filteredClientNames = Stream.of(clientNames).filter(name -> !name.equals(clientNames[clientId1])).toArray(String[]::new);
+            int clientId2 = readInput(in, filteredClientNames);
+            if (clientId1 == -1 || clientId2 == -1) break;
+            client = clients.get(clientId1);
+            ActorRef client2 = clients.get(clientId2);
+            client.tell(new WriteDataMsg(updateValue++, client), client);
+            client2.tell(new WriteDataMsg(updateValue++, client2), client2);
           default:
             break;
         }
