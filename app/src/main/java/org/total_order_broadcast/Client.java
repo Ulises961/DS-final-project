@@ -37,7 +37,6 @@ public class Client extends Node {
         }
     }
 
-    
     public void onStartMessage(JoinGroupMsg msg) {
         setGroup(msg);
         this.coordinator = msg.coordinator;
@@ -102,6 +101,9 @@ public class Client extends Node {
         serverLivenessTimeout.cancel();
         if(server != null){
             server.tell(updates.poll(),getSelf());
+            if(!updates.isEmpty()){
+                pingServer();
+            }
         }
     }
 
