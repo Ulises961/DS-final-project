@@ -1,46 +1,55 @@
 package org.total_order_broadcast;
 
-public class EpochSeqNum {
-    int epoch;
-    int seqNum;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-    public EpochSeqNum(int epoch, int seqNum) {
-        this.epoch = epoch;
-        this.seqNum = seqNum;
+public class EpochSeqNum {
+    Integer currentEpoch;
+    List<SeqNumValue> seqNumValueList;
+    SeqNumValue lastSeqNumValueAdded;
+    Map<Integer,List<SeqNumValue>> epochSeqNumValueMap;
+
+    public EpochSeqNum(int currentEpoch, int seqNum, int value) {
+        this.currentEpoch = currentEpoch;
+        this.seqNumValueList = new ArrayList<>();
+        lastSeqNumValueAdded = new SeqNumValue(seqNum, value);
+        epochSeqNumValueMap = new HashMap<>();
+        seqNumValueList.add(lastSeqNumValueAdded);
+        epochSeqNumValueMap.put(currentEpoch, seqNumValueList);
     }
     public void resetSeqNum(){
-        this.seqNum = 0;
+
     }
 
-    public int getEpoch() {
-        return epoch;
+    public int getCurrentEpoch() {
+        return currentEpoch;
     }
 
-    public EpochSeqNum increaseEpoch(){
-        this.epoch++;
+    public void incrementEpoch(int lastValue){
+        currentEpoch+=1;
+        seqNumValueList = new ArrayList<>();
+        lastSeqNumValueAdded = new SeqNumValue(0,lastValue);
+        seqNumValueList.add(lastSeqNumValueAdded);
+        epochSeqNumValueMap.put(currentEpoch, seqNumValueList);
+    }
+
+    public SeqNumValue getLastSeqNumValue() {
+        return lastSeqNumValueAdded;
+    }
+
+    public EpochSeqNum incrementSeqNum(int value) {
+        lastSeqNumValueAdded = lastSeqNumValueAdded.incrementAndAddValue(value);
+        seqNumValueList.add(lastSeqNumValueAdded);
         return this;
-    }
-    public void setEpoch(int epoch) {
-        this.epoch = epoch;
-    }
-
-    public int getSeqNum() {
-        return seqNum;
-    }
-
-    public EpochSeqNum increaseSeqNum() {
-        this.seqNum++;
-        return this;
-    }
-    public void rollbackSeqNum(){
-        this.seqNum--;
     }
 
     @Override
     public String toString() {
         return "EpochSeqNum{" +
-                "epoch=" + epoch +
-                ", seqNum=" + seqNum +
+                "epoch=" + currentEpoch +
+                ", seqNum=" + seqNumValueList +
                 '}';
     }
 }

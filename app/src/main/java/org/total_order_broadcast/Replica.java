@@ -1,13 +1,12 @@
 package org.total_order_broadcast;
 
 import akka.actor.*;
-import scala.util.Random;
 
 import java.io.Serializable;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import org.total_order_broadcast.Client.RequestRead;
 
@@ -17,55 +16,13 @@ public class Replica extends Node {
   EpochSeqNum acceptedEpochSeqNum;
   EpochSeqNum proposedEpochSeqNum;
   private boolean expectingAcks = false;
-
-  protected int quorum;
-
-  protected Integer currentValue;
-
-  // participants (initial group, current and proposed views)
-  protected final Set<ActorRef> group;
-
-  protected final Set<ActorRef> currentView;
-
-  // each view has is assocaited w/ an Epoch
-  protected final Map<EpochSeqNum, Set<ActorRef>> proposedView;
-
-  // last sequence number for each node message (to avoid delivering duplicates)
-  protected final Map<ActorRef, Integer> membersSeqno;
-
-  // history of updates
-  protected final Map<EpochSeqNum, Integer> updateHistory;
-
-  // deferred messages (of a future view)
-  protected final Set<WriteDataMsg> deferredMsgSet;
-
-  // group view flushes
-  protected final Map<Integer, Set<ActorRef>> flushes;
-
-  // cancellation of the heartbeat timeout
-  protected Cancellable heartbeatTimeout;
-
-  // to include delays in the messages
-  private Random rnd = new Random();
-  // dedicated class to keep track of epoch and seqNum pairs :)
-  protected EpochSeqNum epochSeqNumPair;
-
+  private boolean nextHopTimedOut = false;
+  private int nextHop = -1;
 
   public Replica(int id) {
     super(id);
     this.receivedAcks = new HashSet<>();
-    this.quorum = (N_PARTICIPANTS / 2) + 1;
-    this.epochSeqNumPair = new EpochSeqNum(0, 0);
-    this.group = new HashSet<>();
-    this.currentView = new HashSet<>();
-    this.proposedView = new HashMap<>();
-    this.membersSeqno = new HashMap<>();
-    this.updateHistory = new HashMap<>();
-    this.deferredMsgSet = new HashSet<>();
-    this.flushes = new HashMap<>();
-
     System.out.println("Replica " + id + " created");
-
   }
 
   @Override
@@ -97,26 +54,17 @@ public class Replica extends Node {
         .match(UpdateAck.class, this::onUpdateAck)
         .match(WriteOk.class, this::onWriteOk)
         .match(RequestRead.class, this::onRequestRead)
-        .match(DecisionRequest.class, this::onDecisionRequest)
+        // TODO if we want this, please change what's being sent according to the new implementation of EpochSeqNum
+            //.match(DecisionRequest.class, this::onDecisionRequest)
         .match(Heartbeat.class, this::onHeartbeat)
         .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
         .match(CoordinatorElection.class, this::onCoordinationElection)
         .match(ICMPRequest.class, this::onPing)
+            .match(ElectionTimeout.class, this::onElectionTimeout)
+            .match(ElectionAck.class, this::onElectionAck)
+            .match(ElectionMessage.class, this::onElectionMessageReceipt)
         .build();
   }
-
-  private void updateQuorum() {
-    this.quorum = currentView.size() / 2 + 1;
-  }
-
-  public void setValue(int value) {
-    this.currentValue = value;
-  }
-
-  public int getValue() {
-    return currentValue != null ? currentValue : 0;
-  }
-
 
   public void onRequestRead(RequestRead msg) {
     getSender().tell(currentValue, getSelf());
@@ -145,27 +93,27 @@ public class Replica extends Node {
   public void onUpdateRequest(UpdateRequest msg) {
     // if (id==2) {crash(5000); return;} // simulate a crash
     // if (id==2) delay(4000); // simulate a delay
+    
+    // Updates must be monotonically increasing within the latest epoch 
+      expectingAcks = true;
+      coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
+      setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
 
-    // Updates must be monotonically increasing within the latest epoch
-    expectingAcks = true;
-    coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
-    setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
-
-    // Assume the heartbeat is received
-    renewHeartbeatTimeout();
+      // Assume the heartbeat is received
+      renewHeartbeatTimeout();
   }
 
   public void onTimeout(UpdateTimeOut msg) {
     if (!hasDecided(msg.epochSeqNum)) {
-      multicast(new DecisionRequest(msg.epochSeqNum));
-      setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
+        multicast(new DecisionRequest(msg.epochSeqNum));
+        setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
     }
   }
 
   public void onWriteOk(WriteOk msg) {
     // store the decision
-    fixDecision(msg.value, msg.epochSeqNum);
-
+    // fixDecision(msg.value, msg.epochSeqNum);
+    fixDecision()
     // Assume the heartbeat is received
     renewHeartbeatTimeout();
   }
@@ -179,68 +127,14 @@ public class Replica extends Node {
     if (isCoordinator()) {
       // this node is the coordinator so it can send the update to all replicas
       expectingAcks = true;
-      this.epochSeqNumPair.increaseSeqNum();
-      EpochSeqNum esn = new EpochSeqNum(this.epochSeqNumPair.epoch, this.epochSeqNumPair.seqNum);
-      requestUpdate(msg.value, esn);
+      // TODO: fix this accoridng to the new imlpementation
+      //EpochSeqNum esn = new EpochSeqNum(this.epochSeqNumPair.currentEpoch, this.epochSeqNumPair.seqNum);
+      requestUpdate(msg.value, this.epochSeqNumPair.incrementSeqNum(msg.value));
     } else {
       // forward request to the coordinator
       coordinator.tell(msg, getSelf());
     }
   }
-
-  public void onDecisionRequest(DecisionRequest msg) { /* Decision Request */
-    Integer historicValue = getHistoricValue(msg.epochSeqNum);
-    if (historicValue != null) {
-      getSender().tell(new WriteOk(historicValue, msg.epochSeqNum), getSelf());
-      String message = "received decision request from " +
-          getSender();
-      print(message);
-    }
-  }
-
-  private Integer getHistoricValue(EpochSeqNum esn) {
-    for (Map.Entry<EpochSeqNum, Integer> entry : updateHistory.entrySet()) {
-      EpochSeqNum key = entry.getKey();
-      if (key.epoch == esn.epoch && key.seqNum == esn.seqNum) {
-        return entry.getValue();
-      }
-    }
-    return null;
-  }
-
-  public void multicast(Serializable m) {
-    for (ActorRef p : participants) {
-      delay(rnd.nextInt(RANDOM_DELAY));
-      p.tell(m, getSelf());
-
-    }
-  }
-
-  // a multicast implementation that crashes after sending the first message
-  public void multicastAndCrash(Serializable m) {
-    for (ActorRef p : participants) {
-      delay(rnd.nextInt(RANDOM_DELAY));
-      p.tell(m, getSelf());
-      crash();
-      return;
-    }
-  }
-
-
-  // fix the final decision of the current node
-  public void fixDecision(Integer v, EpochSeqNum epochSeqNum) {
-    if (!hasDecided(epochSeqNum)) {
-      currentValue = v;
-      updateHistory.put(epochSeqNum, v);
-
-      print("Fixing value " + currentValue);
-      print("Update History " + updateHistory.toString());
-    }
-  }
-
-  boolean hasDecided(EpochSeqNum epochSeqNum) {
-    return this.updateHistory.get(epochSeqNum) != null;
-  } // has the node decided?
 
   private void requestUpdate(Integer value, EpochSeqNum seqNum) {
     multicast(new UpdateRequest(value, seqNum));
@@ -251,8 +145,8 @@ public class Replica extends Node {
   public void onHeartbeat(Heartbeat msg) {
     if (isCoordinator()) {
       multicast(new Heartbeat());
-
-      if (this.heartbeatTimeout != null) {
+      
+      if(this.heartbeatTimeout != null) {
         this.heartbeatTimeout.cancel();
       }
       heartbeatTimeout = setTimeout(this.HEARTBEAT_INTERVAL, new Heartbeat());
@@ -264,7 +158,26 @@ public class Replica extends Node {
 
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
     System.out.println("Coordinator is not responding. Starting election." + self().path().name());
-    multicast(new CoordinatorElection(this.id));
+    nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id),nextHop);
+    // TODO: set timer, if it expires, remove "nextHop" and try again;
+    // because of the assumption that there will ALWAYS be a quorum we can safely say that
+    // next hop will NEVER be this node thanks to the assumption made above ^^^^
+    electionTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop));
+  }
+
+  public void onElectionAck(ElectionAck ack) {
+    electionTimeout.cancel();
+    // eventually this will be set to false (assumption that there is always at least a quorum
+    nextHopTimedOut = false;
+  }
+
+  // if nextHop has crashed, we try with the node after that, until someone sends back an Ack
+  public void onElectionTimeout(ElectionTimeout msg) {
+    nextHopTimedOut = true;
+    // because nextHop timedout we try with the one after that: nextHop+1;
+    nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id),msg.next);
+    // set timeout with nextHop+1
+    electionTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop));
   }
 
   public void onCoordinationElection(CoordinatorElection msg) {
@@ -284,10 +197,89 @@ public class Replica extends Node {
     return coordinator.equals(getSelf());
   }
 
-  private void renewHeartbeatTimeout() {
-    if (this.heartbeatTimeout != null) {
+  private void renewHeartbeatTimeout(){
+    if(this.heartbeatTimeout != null) {
       this.heartbeatTimeout.cancel();
     }
     heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
   }
+
+  // election message, this is what each replica receives/sends
+  public static class ElectionMessage implements Serializable {
+    public ActorRef proposedCoordinator;
+    Map<EpochSeqNum, Integer> updateHistory;
+    int proposedCoordinatorID;
+
+    public ElectionMessage(Map<EpochSeqNum, Integer> updateHistory, ActorRef coord, int proposedCoordinatorID) {
+      this.updateHistory = updateHistory;
+      this.proposedCoordinatorID = proposedCoordinatorID;
+      this.proposedCoordinator = coord;
+    }
+
+  }
+
+  /*
+  Logic: sort list of participants, get replica whose id > this.id, then try to send, if timeout update nextHop
+   */
+  private int sendElectionMsg(ElectionMessage electionMessage, int next){
+    if (next == -1) {
+      Collections.sort(participants);
+      int pos = participants.indexOf(this);
+      participants.get((pos + 1) % participants.size()).tell(electionMessage, getSelf());
+      return (pos + 1) % participants.size();
+    }else if (nextHopTimedOut){
+      participants.get((next+1) % participants.size()).tell(electionMessage, getSelf());
+      return (next + 1) % participants.size();
+    }else{
+      participants.get((next) % participants.size()).tell(electionMessage, getSelf());
+      return (next) % participants.size();
+    }
+  }
+
+  public void updateCoordinator(ActorRef coordinator){
+    this.coordinator = coordinator;
+  }
+
+  // on election message receipt, check if up to date
+  public void onElectionMessageReceipt(ElectionMessage electionMessage){
+    // send ack to whoever sent the message
+    getSender().tell(new ElectionAck(),getSelf());
+    // view message content
+    ActorRef proposedCoord = electionMessage.proposedCoordinator;
+    int proposedCoordinatorID = electionMessage.proposedCoordinatorID;
+    // this would be much easier if updateHistory were a Set rather than a Map
+
+    List<EpochSeqNum> epochSeqNumList = (List<EpochSeqNum>) electionMessage.updateHistory.keySet();
+
+    Map<EpochSeqNum, Integer> update = electionMessage.updateHistory;
+    // sorting epochs-seqNums in decreasing order;
+    epochSeqNumList.sort((o1,o2) -> o1.currentEpoch < o2.currentEpoch ? 1 : -1);
+    if (epochSeqNumList.get(0).getCurrentEpoch() > this.epochSeqNumPair.getCurrentEpoch()){
+      // if we're here we missed out 1+ epochs, we must update our history
+      int diff = Math.abs(epochSeqNumList.get(0).getCurrentEpoch() - this.epochSeqNumPair.getCurrentEpoch());
+      // since epoch updates are sequential we can iterate over the difference diff.
+      int pos = 0;
+      while(pos < diff){
+        // there's probably a better way to do this but I can't think of it rn :)
+        // the idea is that we get the epochSeqNum from the List, then we obtain the value from the hashmap
+        // and add those to our updateHistory
+        EpochSeqNum key = epochSeqNumList.get(pos);
+        Integer value = electionMessage.updateHistory.get(key);
+        this.updateHistory.put(key,value);
+        pos++;
+      }
+      // update self, not the message.
+      updateCoordinator(electionMessage.proposedCoordinator);
+    } else if (epochSeqNumList.get(0).getCurrentEpoch() < this.epochSeqNumPair.getCurrentEpoch()) {
+      // we have the latest version so far, we must update the message and forward it.
+      proposedCoord = getSelf();
+      proposedCoordinatorID = this.id;
+      update = this.updateHistory;
+    }else{
+      // check for missed seqNum updates within epochs
+
+    }
+    sendElectionMsg(new ElectionMessage(update,proposedCoord, proposedCoordinatorID),nextHop);
+  }
+
 }
