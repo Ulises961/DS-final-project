@@ -7,49 +7,22 @@ import java.util.Map;
 
 public class EpochSeqNum {
     Integer currentEpoch;
-    List<SeqNumValue> seqNumValueList;
-    SeqNumValue lastSeqNumValueAdded;
-    Map<Integer,List<SeqNumValue>> epochSeqNumValueMap;
+    Integer seqNum;
 
-    public EpochSeqNum(int currentEpoch, int seqNum, int value) {
+    public EpochSeqNum(int currentEpoch, int seqNum) {
         this.currentEpoch = currentEpoch;
-        this.seqNumValueList = new ArrayList<>();
-        lastSeqNumValueAdded = new SeqNumValue(seqNum, value);
-        epochSeqNumValueMap = new HashMap<>();
-        seqNumValueList.add(lastSeqNumValueAdded);
-        epochSeqNumValueMap.put(currentEpoch, seqNumValueList);
-    }
-    public void resetSeqNum(){
-
+        this.seqNum = seqNum;
     }
 
     public int getCurrentEpoch() {
         return currentEpoch;
     }
 
-    public void incrementEpoch(int lastValue){
-        currentEpoch+=1;
-        seqNumValueList = new ArrayList<>();
-        lastSeqNumValueAdded = new SeqNumValue(0,lastValue);
-        seqNumValueList.add(lastSeqNumValueAdded);
-        epochSeqNumValueMap.put(currentEpoch, seqNumValueList);
-    }
-
-    public SeqNumValue getLastSeqNumValue() {
-        return lastSeqNumValueAdded;
-    }
-
-    public EpochSeqNum incrementSeqNum(int value) {
-        lastSeqNumValueAdded = lastSeqNumValueAdded.incrementAndAddValue(value);
-        seqNumValueList.add(lastSeqNumValueAdded);
-        return this;
-    }
-
     @Override
     public String toString() {
         return "EpochSeqNum{" +
                 "epoch=" + currentEpoch +
-                ", seqNum=" + seqNumValueList +
+                ", seqNum=" + seqNum +
                 '}';
     }
 }

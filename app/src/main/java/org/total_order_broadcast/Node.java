@@ -73,7 +73,7 @@ public abstract class Node extends AbstractActor {
   public Node(int id) {
     super();
     this.id = id;
-    this.epochSeqNumPair = new EpochSeqNum(0, 0,0);
+    this.epochSeqNumPair = new EpochSeqNum(0, 0);
     this.group = new HashSet<>();
     this.currentView = new HashSet<>();
     this.proposedView = new HashMap<>();
@@ -312,7 +312,7 @@ public abstract class Node extends AbstractActor {
   }
 
   // fix the final decision of the current node
-  void fixDecision(Integer v, EpochSeqNum epochSeqNum) {
+  void commitDecision(Integer v, EpochSeqNum epochSeqNum) {
     if (!hasDecided(epochSeqNum)) {
       currentValue = v;
       updateHistory.put(epochSeqNum, v);
@@ -351,10 +351,9 @@ public abstract class Node extends AbstractActor {
   private Integer getHistoricValue(EpochSeqNum esn) {
     for (Map.Entry<EpochSeqNum, Integer> entry : updateHistory.entrySet()) {
       EpochSeqNum key = entry.getKey();
-      /* if (key.currentEpoch == esn.currentEpoch && key.seqNum == esn.seqNum) {
+      if (key.currentEpoch == esn.currentEpoch && key.seqNum == esn.seqNum) {
         return entry.getValue();
       }
-       */
     }
     return null;
   }
