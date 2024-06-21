@@ -42,7 +42,7 @@ public abstract class Node extends AbstractActor {
   protected final Map<ActorRef, Integer> membersSeqno;
 
   // history of updates
-  protected final Map<EpochSeqNum, Integer> updateHistory;
+  protected Map<EpochSeqNum, Integer> updateHistory;
 
   // deferred messages (of a future view)
   protected final Set<WriteDataMsg> deferredMsgSet;
@@ -107,6 +107,13 @@ public abstract class Node extends AbstractActor {
     public UpdateRequest(Integer value, EpochSeqNum epochSeqNum) {
       this.value = value;
       this.epochSeqNum = epochSeqNum;
+    }
+  }
+
+  public static class SyncMessage implements Serializable {
+    public Map<EpochSeqNum, Integer> updateHistory;
+    public SyncMessage(Map<EpochSeqNum, Integer> updateHistory) {
+      this.updateHistory = Collections.unmodifiableMap(new HashMap<EpochSeqNum,Integer>(updateHistory));
     }
   }
 

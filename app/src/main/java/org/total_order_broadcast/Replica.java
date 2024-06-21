@@ -3,10 +3,7 @@ package org.total_order_broadcast;
 import akka.actor.*;
 
 import java.io.Serializable;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import org.total_order_broadcast.Client.RequestRead;
 
@@ -252,6 +249,11 @@ public class Replica extends Node {
     this.coordinator = coordinator;
   }
 
+
+  public void onSyncMessageReceipt(SyncMessage sm){
+    this.updateHistory = new HashMap<>(sm.updateHistory);
+  }
+
   // on election message receipt, check if up to date
   public void onElectionMessageReceipt(ElectionMessage electionMessage){
     // send ack to whoever sent the message
@@ -259,6 +261,9 @@ public class Replica extends Node {
       // END ELECTION
       this.coordinator = proposedCoord;
       cleanUp();
+      if (isCoordinator()){
+        multicast(new SyncMessage(updateHistory));
+      }
     } else {
       hasReceivedElectionMessage = true;
       getSender().tell(new ElectionAck(), getSelf());
