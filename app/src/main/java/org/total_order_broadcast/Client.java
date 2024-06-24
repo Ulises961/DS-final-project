@@ -100,7 +100,10 @@ public class Client extends Node {
         checkingServer = false;
         serverLivenessTimeout.cancel();
         if(server != null){
-            server.tell(updates.poll(),getSelf());
+            UpdateRequest update = updates.poll();
+            if(update != null) {
+                server.tell(update,getSelf());
+            }
             if(!updates.isEmpty()){
                 pingServer();
             }

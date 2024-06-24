@@ -1,18 +1,20 @@
 package org.total_order_broadcast;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.io.Serializable;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
+import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
+import akka.actor.Cancellable;
 import scala.concurrent.duration.Duration;
 import scala.util.Random;
-import akka.actor.*;
 
 public abstract class Node extends AbstractActor {
 
@@ -33,7 +35,7 @@ public abstract class Node extends AbstractActor {
   // participants (initial group, current and proposed views)
   protected final Set<ActorRef> group;
 
-  protected final Set<ActorRef> currentView;
+  protected Set<ActorRef> currentView;
 
   // each view has is assocaited w/ an Epoch
   protected final Map<EpochSeqNum, Set<ActorRef>> proposedView;
@@ -47,9 +49,6 @@ public abstract class Node extends AbstractActor {
   // deferred messages (of a future view)
   protected final Set<WriteDataMsg> deferredMsgSet;
 
-  // group view flushes
-  protected final Map<Integer, Set<ActorRef>> flushes;
-
   // cancellation of the heartbeat timeout
   protected Cancellable heartbeatTimeout;
 
@@ -60,7 +59,7 @@ public abstract class Node extends AbstractActor {
 
   // TODO missed updates message to bring replicas up to date, from the
   // coordinator
-
+  protected  Map<Integer, Set<ActorRef>> flushes;
   // Hearbeat
   protected final int HEARTBEAT_TIMEOUT_DURATION = 2000;
   protected final int HEARTBEAT_INTERVAL = 1000;
@@ -79,7 +78,6 @@ public abstract class Node extends AbstractActor {
     this.proposedView = new HashMap<>();
     this.membersSeqno = new HashMap<>();
     this.deferredMsgSet = new HashSet<>();
-    this.flushes = new HashMap<>();
     this.quorum = (N_PARTICIPANTS / 2) + 1;
     updateHistory = new HashMap<>();
     updateHistory.put(epochSeqNumPair, 0);
@@ -113,6 +111,7 @@ public abstract class Node extends AbstractActor {
 
   public static class SyncMessage implements Serializable {
     public Map<EpochSeqNum, Integer> updateHistory;
+
     public SyncMessage(Map<EpochSeqNum, Integer> updateHistory) {
       this.updateHistory = Collections.unmodifiableMap(new HashMap<EpochSeqNum,Integer>(updateHistory));
     }
@@ -128,22 +127,16 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  public static class DecisionRequest implements Serializable {
-    public final EpochSeqNum epochSeqNum;
-
-    public DecisionRequest(EpochSeqNum epochSeqNum) {
-      this.epochSeqNum = epochSeqNum;
-    }
-  }
-
   // TODO change this according to the new implementation of ESN, also the paper only says that the nodes share the UPDATED value
   public static class WriteOk implements Serializable {
     public final Integer value;
     public final EpochSeqNum epochSeqNum;
+    public final ActorRef proposer;
 
-    public WriteOk(Integer v, EpochSeqNum epochSeqNum) {
+    public WriteOk(Integer v, EpochSeqNum epochSeqNum, ActorRef proposer) {
       value = v;
       this.epochSeqNum = epochSeqNum;
+      this.proposer =  proposer;
     }
   }
 
@@ -187,14 +180,6 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  public static class CoordinatorElection implements Serializable {
-    Integer proposedCoordinatorId;
-
-    public CoordinatorElection(Integer proposedCoordinatorId) {
-      this.proposedCoordinatorId = proposedCoordinatorId;
-    }
-  }
-
   public static class ElectionAck implements Serializable {}
 
   public static class Heartbeat extends Timeout {}
@@ -203,8 +188,10 @@ public abstract class Node extends AbstractActor {
 
   public static class ElectionTimeout extends Timeout {
     int next;
-    public ElectionTimeout(int next) {
+    Map<Integer,Set<ActorRef>> flushes;
+    public ElectionTimeout(int next, Map<Integer,Set<ActorRef>> flushes) {
       this.next = next;
+      this.flushes = flushes;
     }
   }
 
@@ -226,22 +213,30 @@ public abstract class Node extends AbstractActor {
     }
   }
 
+  public static class PendingWriteMsg extends WriteDataMsg {
+    public PendingWriteMsg(Integer value, ActorRef sender, boolean shouldCrash) {
+      super(value, sender, shouldCrash);
+    }
+
+    public PendingWriteMsg(Integer value, ActorRef sender) {
+      super(value, sender);
+    }
+  }
+
   public static class ViewChangeMsg implements Serializable {
-    public final Integer viewId;
+    public final EpochSeqNum esn;
     public final Set<ActorRef> proposedView;
 
-    public ViewChangeMsg(int viewId, Set<ActorRef> proposedView) {
-      this.viewId = viewId;
+    public ViewChangeMsg(EpochSeqNum esn, Set<ActorRef> proposedView) {
+      this.esn = esn;
       this.proposedView = Collections.unmodifiableSet(new HashSet<>(proposedView));
     }
   }
 
   public static class CrashMsg implements Serializable {}
-
-  public static class RecoveryMsg implements Serializable {}
-
   public static class ICMPRequest implements Serializable {}
   public static class ICMPResponse implements Serializable {}
+  public static class FlushMsg implements Serializable {}
 
   public static class ICMPTimeout extends Timeout {}
   
@@ -263,7 +258,7 @@ public abstract class Node extends AbstractActor {
   // abstract method to be implemented in extending classes
   protected abstract void onRecovery(Recovery msg);
 
-  void setGroup(JoinGroupMsg sm) {
+  public void setGroup(JoinGroupMsg sm) {
     participants = new ArrayList<>();
     for (ActorRef b : sm.group) {
       this.participants.add(b);
@@ -272,7 +267,7 @@ public abstract class Node extends AbstractActor {
   }
 
   // emulate a crash and a recovery in a given time
-  void crash() {
+  public void crash() {
     getContext().become(crashed());
     print("CRASH!!!");
   }
@@ -284,14 +279,14 @@ public abstract class Node extends AbstractActor {
   }
 
   // emulate a delay of d milliseconds
-  void delay(int d) {
+  public void delay(int d) {
     try {
       Thread.sleep(d);
     } catch (Exception ignored) {
     }
   }
 
-  void multicast(Serializable m) {
+  public void multicast(Serializable m) {
     for (ActorRef p : participants) {
       try {
         Thread.sleep(rnd.nextInt(RANDOM_DELAY));
@@ -304,7 +299,7 @@ public abstract class Node extends AbstractActor {
   }
 
   // a multicast implementation that crashes after sending the first message
-  void multicastAndCrash(Serializable m) {
+  public void multicastAndCrash(Serializable m) {
     for (ActorRef p : participants) {
       try {
         Thread.sleep(rnd.nextInt(RANDOM_DELAY));
@@ -327,7 +322,7 @@ public abstract class Node extends AbstractActor {
   }
 
   // fix the final decision of the current node
-  void commitDecision(Integer v, EpochSeqNum epochSeqNum) {
+  public void commitDecision(Integer v, EpochSeqNum epochSeqNum) {
     if (!hasDecided(epochSeqNum)) {
       currentValue = v;
       updateHistory.put(epochSeqNum, v);
@@ -342,7 +337,7 @@ public abstract class Node extends AbstractActor {
   } // has the node decided?
 
   // a simple logging function
-  void print(String s) {
+  public void print(String s) {
     System.out.format("%2d: %s\n", id, s);
   }
 
@@ -353,23 +348,4 @@ public abstract class Node extends AbstractActor {
     return receiveBuilder().build();
   }
 
-  public void onDecisionRequest(DecisionRequest msg) { /* Decision Request */
-    Integer historicValue = getHistoricValue(msg.epochSeqNum);
-    if (historicValue != null) {
-      getSender().tell(new WriteOk(historicValue, msg.epochSeqNum), getSelf());
-      String message = "received decision request from " +
-          getSender();
-      print(message);
-    }
-  }
-
-  private Integer getHistoricValue(EpochSeqNum esn) {
-    for (Map.Entry<EpochSeqNum, Integer> entry : updateHistory.entrySet()) {
-      EpochSeqNum key = entry.getKey();
-      if (key.currentEpoch == esn.currentEpoch && key.seqNum == esn.seqNum) {
-        return entry.getValue();
-      }
-    }
-    return null;
-  }
 }
