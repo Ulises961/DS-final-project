@@ -78,10 +78,11 @@ public abstract class Node extends AbstractActor {
     this.currentView = new HashSet<>();
     this.proposedView = new HashMap<>();
     this.membersSeqno = new HashMap<>();
-    this.updateHistory = new HashMap<>();
     this.deferredMsgSet = new HashSet<>();
     this.flushes = new HashMap<>();
     this.quorum = (N_PARTICIPANTS / 2) + 1;
+    updateHistory = new HashMap<>();
+    updateHistory.put(epochSeqNumPair, 0);
   }
 
   private void updateQuorum() {
@@ -243,7 +244,14 @@ public abstract class Node extends AbstractActor {
   public static class ICMPResponse implements Serializable {}
 
   public static class ICMPTimeout extends Timeout {}
+  
+  public static class UpdateMsg implements Serializable {
+    public final EpochSeqNum epochSeqNum;
 
+    public UpdateMsg(EpochSeqNum esn) {
+      this.epochSeqNum = esn;
+    }
+  }
   public void setValue(int value) {
     this.currentValue = value;
   }

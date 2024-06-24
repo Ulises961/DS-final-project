@@ -32,12 +32,8 @@ public class Replica extends Node {
     return Props.create(Replica.class, () -> new Replica(id));
   }
 
-  public static class UpdateMsg implements Serializable {
-    public final EpochSeqNum epochSeqNum;
-
-    public UpdateMsg(EpochSeqNum esn) {
-      this.epochSeqNum = esn;
-    }
+  public void onCrash(CrashMsg msg){
+    crash();
   }
 
   @Override
@@ -58,9 +54,10 @@ public class Replica extends Node {
         .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
         .match(CoordinatorElection.class, this::onCoordinationElection)
         .match(ICMPRequest.class, this::onPing)
-            .match(ElectionTimeout.class, this::onElectionTimeout)
-            .match(ElectionAck.class, this::onElectionAck)
-            .match(ElectionMessage.class, this::onElectionMessageReceipt)
+        .match(ElectionTimeout.class, this::onElectionTimeout)
+        .match(ElectionAck.class, this::onElectionAck)
+        .match(ElectionMessage.class, this::onElectionMessageReceipt)
+        .match(CrashMsg.class, this::onCrash)
         .build();
   }
 
@@ -233,7 +230,7 @@ public class Replica extends Node {
   private int sendElectionMsg(ElectionMessage electionMessage, int next){
     if (next == -1) {
       Collections.sort(participants);
-      int pos = participants.indexOf(this);
+      int pos = participants.indexOf(getSelf());
       participants.get((pos + 1) % participants.size()).tell(electionMessage, getSelf());
       return (pos + 1) % participants.size();
     }else if (nextHopTimedOut){
@@ -272,8 +269,8 @@ public class Replica extends Node {
       proposedCoord = electionMessage.proposedCoordinator;
       proposedCoordinatorID = electionMessage.proposedCoordinatorID;
 
-      List<EpochSeqNum> epochSeqNumList = (List<EpochSeqNum>) electionMessage.updateHistory.keySet();
-
+      List<EpochSeqNum> epochSeqNumList = new LinkedList<>(electionMessage.updateHistory.keySet());
+      
       Map<EpochSeqNum, Integer> update = electionMessage.updateHistory;
       // sorting epochs-seqNums in decreasing order;
       epochSeqNumList.sort((o1, o2) -> o1.currentEpoch < o2.currentEpoch ? 1 : -1);
