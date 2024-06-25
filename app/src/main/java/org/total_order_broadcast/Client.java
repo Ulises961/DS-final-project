@@ -73,7 +73,7 @@ public class Client extends Node {
         // client doesn't crash
     }
 
-    public static class RequestRead{}
+    public static class RequestRead {}
 
     public void assignServer(){
         Iterator<ActorRef> iterator = participants.iterator();
@@ -87,15 +87,18 @@ public class Client extends Node {
     }
 
     public void onTimeout(Timeout msg) {
+        logWithMDC("Server timeout, changing server " + server.path().name());
         participants.remove(server);
         assignServer();
+        onRequestRead(new RequestRead());
+
     }
 
     public void onRequestRead(RequestRead msg){
         if(server != null){
             server.tell(new ReadDataMsg(getSelf()),getSelf());
-            readTimeout = setTimeout(DECISION_TIMEOUT, new Timeout());
-        }
+            readTimeout = setTimeout(VOTE_TIMEOUT, new Timeout());
+        } 
     }
 
     public void onReadResponse(DataMsg res) {
