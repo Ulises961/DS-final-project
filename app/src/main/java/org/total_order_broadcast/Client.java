@@ -3,9 +3,12 @@
  */
 package org.total_order_broadcast;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
+
+import org.slf4j.LoggerFactory;
 
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
@@ -25,6 +28,10 @@ public class Client extends Node {
     public Client(){
         super(clientNumber++);
         this.participants = new HashSet<>();
+        this.logger = LoggerFactory.getLogger(Client.class);
+
+        contextMap = new HashMap<>();
+        contextMap.put("replicaId", getSelf().path().name());
     }
 
     static public Props props() {
@@ -58,7 +65,7 @@ public class Client extends Node {
             this.participants.add(b);
           }
         }
-        print("starting with " + sm.group.size() + " peer(s)");
+        logWithMDC(contextMap, "starting with " + sm.group.size() + " peer(s)");
       }
 
     @Override
@@ -92,7 +99,6 @@ public class Client extends Node {
     }
 
     public void onReadResponse(DataMsg res) {
-        System.out.println("Client received:"+res.value);
         readTimeout.cancel();
     }
 
@@ -128,14 +134,14 @@ public class Client extends Node {
     @Override
     public Receive createReceive() {
         return receiveBuilder()
-                .match(JoinGroupMsg.class,this::onStartMessage)
-                .match(WriteDataMsg.class,this::onSendUpdate)
-                .match(DataMsg.class, this::onReadResponse)
-                .match(RequestRead.class, this::onRequestRead)
-                .match(Timeout.class, this::onTimeout)
-                .match(ICMPResponse.class, this::onPong)
-                .match(ICMPTimeout.class, this::ICMPTimeout)
-                .build();
+            .match(JoinGroupMsg.class,this::onStartMessage)
+            .match(WriteDataMsg.class,this::onSendUpdate)
+            .match(DataMsg.class, this::onReadResponse)
+            .match(RequestRead.class, this::onRequestRead)
+            .match(Timeout.class, this::onTimeout)
+            .match(ICMPResponse.class, this::onPong)
+            .match(ICMPTimeout.class, this::ICMPTimeout)
+            .build();
     }
 
 }

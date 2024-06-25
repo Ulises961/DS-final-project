@@ -13,8 +13,13 @@ import java.util.concurrent.TimeUnit;
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
+
 import scala.concurrent.duration.Duration;
 import scala.util.Random;
+
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
+import org.slf4j.MDC;
 
 public abstract class Node extends AbstractActor {
 
@@ -69,6 +74,9 @@ public abstract class Node extends AbstractActor {
   final static int DECISION_TIMEOUT = 1000; // timeout for the decision, ms
   final static int RANDOM_DELAY = Math.round((VOTE_TIMEOUT + 50) / N_PARTICIPANTS); // timeout for the decision, ms
 
+  protected Logger logger; 
+  protected Map<String, String> contextMap;
+
   public Node(int id) {
     super();
     this.id = id;
@@ -81,6 +89,7 @@ public abstract class Node extends AbstractActor {
     this.quorum = (N_PARTICIPANTS / 2) + 1;
     updateHistory = new HashMap<>();
     updateHistory.put(epochSeqNumPair, 0);
+    logger = LoggerFactory.getLogger(Node.class);
   }
 
   private void updateQuorum() {
@@ -151,8 +160,7 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  public static class Recovery implements Serializable {
-  }
+  public static class Recovery implements Serializable {}
 
   public static class JoinGroupMsg implements Serializable {
     public final List<ActorRef> group; // an array of group members
@@ -263,7 +271,9 @@ public abstract class Node extends AbstractActor {
     for (ActorRef b : sm.group) {
       this.participants.add(b);
     }
-    print("Starting with " + sm.group.size() + " peer(s)");
+
+    logWithMDC(contextMap, "Starting with " + sm.group.size() + " peer(s)");
+    logWithMDC(contextMap, "Participants: " + participants.toString());
   }
 
   // emulate a crash and a recovery in a given time
@@ -288,11 +298,7 @@ public abstract class Node extends AbstractActor {
 
   public void multicast(Serializable m) {
     for (ActorRef p : participants) {
-      try {
-        Thread.sleep(rnd.nextInt(RANDOM_DELAY));
-      } catch (InterruptedException e) {
-        e.printStackTrace();
-      }
+      delay(RANDOM_DELAY);
       p.tell(m, getSelf());
 
     }
@@ -301,11 +307,7 @@ public abstract class Node extends AbstractActor {
   // a multicast implementation that crashes after sending the first message
   public void multicastAndCrash(Serializable m) {
     for (ActorRef p : participants) {
-      try {
-        Thread.sleep(rnd.nextInt(RANDOM_DELAY));
-      } catch (InterruptedException e) {
-        e.printStackTrace();
-      }
+      delay(RANDOM_DELAY);
       p.tell(m, getSelf());
       crash();
       return;
@@ -348,4 +350,36 @@ public abstract class Node extends AbstractActor {
     return receiveBuilder().build();
   }
 
+    // Utility method for logging with MDC context
+    protected void logWithMDC(Map<String, String> contextMap, String message) {
+        try {
+            LogLevel level = LogLevel.INFO;
+            // Set MDC context
+            contextMap.forEach(MDC::put);
+
+            // Log the message at the specified level
+            switch (level) {
+                case INFO:
+                    logger.info(message);
+                    break;
+                case WARN:
+                    logger.warn(message);
+                    break;
+                case ERROR:
+                    logger.error(message);
+                    break;
+                case DEBUG:
+                    logger.debug(message);
+                    break;
+            }
+        } finally {
+            // Clear MDC context
+            MDC.clear();
+        }
+    }
+
+    // Define LogLevel as an enum for convenience
+    enum LogLevel {
+        INFO, WARN, ERROR, DEBUG
+    }
 }
