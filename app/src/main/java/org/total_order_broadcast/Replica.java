@@ -97,6 +97,7 @@ public class Replica extends Node {
         .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
         .match(ICMPRequest.class, this::onPing)
         .match(CrashMsg.class, this::onCrash)
+        .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (normal mode)"))
         .build();
       }
       
@@ -110,7 +111,7 @@ public class Replica extends Node {
       .match(FlushMsg.class, this::onFlushMessage)
       .match(SyncMessage.class, this::onSyncMessageReceipt)
       .match(ViewChangeMsg.class, this::onViewChange)
-      .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (crashed)"))
+      .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (election mode)"))
       .build();
   }
   
@@ -150,13 +151,18 @@ public class Replica extends Node {
         requestUpdate(msg.value, msg.sender);
       } else {
         logWithMDC("Received update message from client: " + msg.value);
-        // forward request to the coordinator
-        coordinator.tell(msg, getSelf());
+        // forward request to the coordinator, do not propagate the shouldCrash flag
+        coordinator.tell(new WriteDataMsg(msg.value, msg.sender), getSelf());
 
         logWithMDC("Forwarding update message to coordinator: " + coordinator + " with value " + msg.value );
         // Keep message in memory as pending
         pendingMsg.add(msg);
         logWithMDC("Pending message: " + msg.value);
+      }
+
+      // The crash occurs only to the client's server
+      if(msg.shouldCrash){
+        crash();
       }
     }
   }
@@ -330,6 +336,7 @@ public class Replica extends Node {
       flushedReplicas.add(getSender());
       if (flushedReplicas.size() >= proposedView.size()) {
         multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch++, 0), proposedView.get(epochSeqNumPair), coordinator));
+        currentRequest = 0;
         logWithMDC("View change message sent");
       }
     }
@@ -337,7 +344,8 @@ public class Replica extends Node {
 
   public void onViewChange(ViewChangeMsg msg) {
     participants.clear();
-    
+    epochSeqNumPair = msg.esn;
+
     for(ActorRef participant : msg.proposedView){
       this.participants.add(participant);
       logWithMDC("New participant added: " + participant.path().name());
@@ -354,7 +362,6 @@ public class Replica extends Node {
     }
 
   }
-
 
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
@@ -426,7 +433,7 @@ public class Replica extends Node {
         proposedCoord = proposedCoordinatorID == this.id ? getSelf() : proposedCoord;
       }
 
-      logWithMDC(" Received election message. Proposed coordinator: " + proposedCoordinatorID);
+      logWithMDC(" Received election messagefrom " +getSender() + ". Proposed coordinator: " + proposedCoordinatorID);
       sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.flushes), nextHop);
       electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, electionMessage.flushes));
     }
