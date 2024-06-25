@@ -132,7 +132,8 @@ public class Cluster {
             client = clients.get(clientId);
             boolean shouldCrash = true;
             client.tell(new WriteDataMsg(updateValue++, client, shouldCrash), client);
-          case 6:
+            break;
+            case 6:
             // Concurrent updates
             int clientId1 = readInput(in, clientNames);
             String[] filteredClientNames = Stream.of(clientNames).filter(name -> !name.equals(clientNames[clientId1])).toArray(String[]::new);
