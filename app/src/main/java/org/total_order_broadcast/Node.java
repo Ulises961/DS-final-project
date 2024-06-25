@@ -65,6 +65,7 @@ public abstract class Node extends AbstractActor {
   // TODO missed updates message to bring replicas up to date, from the
   // coordinator
   protected  Map<Integer, Set<ActorRef>> flushes;
+
   // Hearbeat
   protected final int HEARTBEAT_TIMEOUT_DURATION = 2000;
   protected final int HEARTBEAT_INTERVAL = 1000;
@@ -75,6 +76,7 @@ public abstract class Node extends AbstractActor {
   final static int RANDOM_DELAY = Math.round((VOTE_TIMEOUT + 50) / N_PARTICIPANTS); // timeout for the decision, ms
 
   protected Logger logger; 
+
   protected Map<String, String> contextMap;
 
   public Node(int id) {
@@ -234,10 +236,12 @@ public abstract class Node extends AbstractActor {
   public static class ViewChangeMsg implements Serializable {
     public final EpochSeqNum esn;
     public final Set<ActorRef> proposedView;
+    public final ActorRef coordinator;
 
-    public ViewChangeMsg(EpochSeqNum esn, Set<ActorRef> proposedView) {
+    public ViewChangeMsg(EpochSeqNum esn, Set<ActorRef> proposedView, ActorRef coordinator) {
       this.esn = esn;
       this.proposedView = Collections.unmodifiableSet(new HashSet<>(proposedView));
+      this.coordinator = coordinator;
     }
   }
 
@@ -272,8 +276,8 @@ public abstract class Node extends AbstractActor {
       this.participants.add(b);
     }
 
-    logWithMDC(contextMap, "Starting with " + sm.group.size() + " peer(s)");
-    logWithMDC(contextMap, "Participants: " + participants.toString());
+    logWithMDC( "Starting with " + sm.group.size() + " peer(s)");
+    logWithMDC( "Participants: " + participants.toString());
   }
 
   // emulate a crash and a recovery in a given time
@@ -351,12 +355,11 @@ public abstract class Node extends AbstractActor {
   }
 
     // Utility method for logging with MDC context
-    protected void logWithMDC(Map<String, String> contextMap, String message) {
+    protected void logWithMDC(String message) {
         try {
             LogLevel level = LogLevel.INFO;
-            // Set MDC context
+            // Set MDC logContext
             contextMap.forEach(MDC::put);
-
             // Log the message at the specified level
             switch (level) {
                 case INFO:

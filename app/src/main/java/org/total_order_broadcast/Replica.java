@@ -125,12 +125,12 @@ public class Replica extends Node {
     onHeartbeatTimeout(new HeartbeatTimeout());
     setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
 
-    logWithMDC(contextMap,"Timeout for update request: " + msg.epochSeqNum);
+    logWithMDC("Timeout for update request: " + msg.epochSeqNum);
   }
   
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
     msg.sender.tell(new DataMsg(getValue()), getSelf());
-    logWithMDC(contextMap,"Read read from Client: " + getSender().path().name() + " Value returned: " + currentValue);
+    logWithMDC("Read read from Client: " + getSender().path().name() + " Value returned: " + currentValue);
   }
 
   /*
@@ -142,18 +142,19 @@ public class Replica extends Node {
     // Defer messages during election. New messages make part of the next epoch
     if(deferringMessages) {
       deferredMsgSet.add(msg);
-      logWithMDC(contextMap,"Deferring message: " + msg.value);
+      logWithMDC("Deferring message: " + msg.value);
     } else {
       if (isCoordinator()) {
         requestUpdate(msg.value, msg.sender);
       } else {
-        logWithMDC(contextMap,"Received update message from client: " + msg.value);
+        logWithMDC("Received update message from client: " + msg.value);
         // forward request to the coordinator
         coordinator.tell(msg, getSelf());
-        
+
+        logWithMDC("Forwarding update message to coordinator: " + coordinator + " with value " + msg.value );
         // Keep message in memory as pending
         pendingMsg.add(msg);
-        logWithMDC(contextMap,"Pending message: " + msg.value);
+        logWithMDC("Pending message: " + msg.value);
       }
     }
   }
@@ -170,14 +171,14 @@ public class Replica extends Node {
     expectingAcks = true;
     epochSeqNumPair.seqNum++;
     EpochSeqNum esn = new EpochSeqNum(this.epochSeqNumPair.currentEpoch, this.epochSeqNumPair.seqNum);
-    logWithMDC(contextMap,"Epoch sequence number: " + esn);
+    logWithMDC("Epoch sequence number: " + esn);
     multicast(new UpdateRequest(value, esn));
 
     // Store in memory which replica initiated the request. 
     // The writeOk includes the replica that initiated the request
     // The replica will remove the message from its pending list once the writeOk is received
     this.pendingRequests.put(esn, sender);
-    logWithMDC(contextMap,"Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn);
+    logWithMDC("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn);
   }
 
   // CO-HORTS RECEIVE THIS AND SEND ACKS BACK TO THE COORDINATOR
@@ -185,7 +186,7 @@ public class Replica extends Node {
     // Updates must be monotonically increasing within the latest epoch
     expectingAcks = true;
     coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
-    logWithMDC(contextMap,"Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum);
+    logWithMDC("Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum);
     
     if(updateTimeOut != null) {
       updateTimeOut.cancel();
@@ -203,7 +204,7 @@ public class Replica extends Node {
       ActorRef sender = getSender();
       receivedAcks.add(sender);
       if (receivedAcks.size() >= quorum) { // enough acks received, now send WRITEOK message
-        logWithMDC(contextMap,"Quorum reached, sending Ok for value " + ack.value);
+        logWithMDC("Quorum reached, sending Ok for value " + ack.value);
         ActorRef proposer = pendingRequests.get(ack.epochSeqNum);
         multicast(new WriteOk(ack.value, ack.epochSeqNum, proposer));
         expectingAcks = false; // update phase completed, no more acks expected
@@ -217,7 +218,7 @@ public class Replica extends Node {
 
     // Check if the message is the next in sequence
     if(msg.epochSeqNum.seqNum == this.epochSeqNumPair.seqNum + 1){
-      logWithMDC(contextMap,"Committing value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
+      logWithMDC("Committing value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
       
       // store the decision
       commitDecision(msg.value, msg.epochSeqNum);
@@ -225,11 +226,11 @@ public class Replica extends Node {
       // Check if there are any pending writes that can now be committed
       while(unstableWrites.containsKey(new EpochSeqNum(this.epochSeqNumPair.currentEpoch, this.epochSeqNumPair.seqNum + 1))){
         WriteOk writeOk = unstableWrites.get(new EpochSeqNum(this.epochSeqNumPair.currentEpoch, this.epochSeqNumPair.seqNum + 1));
-        logWithMDC(contextMap,"Committing value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum);
+        logWithMDC("Committing value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum);
         commitDecision(writeOk.value, writeOk.epochSeqNum);
       }
     } else {
-      logWithMDC(contextMap,"Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
+      logWithMDC("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
       // Defer commit until the correct sequence number is reached
       unstableWrites.put(msg.epochSeqNum, msg);
     } 
@@ -240,7 +241,7 @@ public class Replica extends Node {
       while (iterator.hasNext()) {
           WriteDataMsg currentMsg = iterator.next();
           if (currentMsg.value == msg.value) {
-              logWithMDC(contextMap,"Removing pending message: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
+              logWithMDC("Removing pending message: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
               iterator.remove();
               break; // Exit the loop after removing the first match
           }
@@ -277,7 +278,7 @@ public class Replica extends Node {
   // COORDINATOR CRASHED, THIS NODE IS THE ONE WHICH DETECTED THE CRASH, THUS THE INITIATOR OF THE ELECTION ALGO
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
     System.out.println("Coordinator is not responding. Starting election." + getSelf().path().name());
-    logWithMDC(contextMap,"Coordinator is not responding. Starting election.");
+    logWithMDC("Coordinator is not responding. Starting election.");
 
     getContext().become(electionMode());
     deferringMessages = true;
@@ -288,7 +289,7 @@ public class Replica extends Node {
     Set<ActorRef> activeReplicas = new HashSet<>();
     activeReplicas.add(getSelf());
     flushes.put(epochSeqNumPair.currentEpoch, activeReplicas);
-
+    logWithMDC(flushes.toString());
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory, getSelf(), this.id, flushes), nextHop);
     // because of the assumption that there will ALWAYS be a quorum we can safely say that
     // next hop will NEVER be this node
@@ -313,7 +314,7 @@ public class Replica extends Node {
 
 
   public void onPing(ICMPRequest msg) {
-    logWithMDC(contextMap,"Received ping from " + getSender().path().name());
+    logWithMDC("Received ping from " + getSender().path().name());
     getSender().tell(new ICMPResponse(), getSelf());
   }
 
@@ -337,18 +338,23 @@ public class Replica extends Node {
       Set<ActorRef> flushedReplicas = this.proposedView.get(this.epochSeqNumPair);
       flushedReplicas.add(getSender());
       if (flushedReplicas.size() >= proposedView.size()) {
-        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch++, 0), proposedView.get(epochSeqNumPair)));
-        logWithMDC(contextMap,"View change message sent");
+        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch++, 0), proposedView.get(epochSeqNumPair), coordinator));
+        logWithMDC("View change message sent");
       }
     }
   }
 
   public void onViewChange(ViewChangeMsg msg) {
     participants.clear();
+    
     for(ActorRef participant : msg.proposedView){
       this.participants.add(participant);
-      logWithMDC(contextMap,"New participant added: " + participant.path().name());
+      logWithMDC("New participant added: " + participant.path().name());
     }
+    coordinator = msg.coordinator;
+
+    logWithMDC( "Participants in the new view: " + participants.toString());
+    logWithMDC( "Coordinator in the new view: " + coordinator.path().name());
     getContext().become(createReceive());
     deferringMessages = false;
   }
@@ -446,7 +452,7 @@ public class Replica extends Node {
         proposedCoord = proposedCoordinatorID == this.id ? getSelf() : proposedCoord;
       }
 
-      logWithMDC(contextMap," Received election message. Proposed coordinator: " + proposedCoordinatorID);
+      logWithMDC(" Received election message. Proposed coordinator: " + proposedCoordinatorID);
       sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.flushes), nextHop);
     }
   }

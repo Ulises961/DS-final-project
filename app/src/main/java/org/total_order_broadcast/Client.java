@@ -65,7 +65,7 @@ public class Client extends Node {
             this.participants.add(b);
           }
         }
-        logWithMDC(contextMap, "starting with " + sm.group.size() + " peer(s)");
+        logWithMDC( "starting with " + sm.group.size() + " peer(s)");
       }
 
     @Override

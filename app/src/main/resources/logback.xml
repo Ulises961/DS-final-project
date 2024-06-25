@@ -4,7 +4,7 @@
 
     <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%logger{0} %msg%n</pattern>
+            <pattern>%logger{0} %X{replicaId} %msg%n</pattern>
         </encoder>
     </appender>
 
@@ -17,7 +17,7 @@
                 <maxHistory>7</maxHistory>
         </rollingPolicy>
         <encoder>
-            <pattern>%logger{0} %msg%n</pattern>
+            <pattern>%logger{0} %X{replicaId} %msg%n</pattern>
             <outputPatternAsHeader>true</outputPatternAsHeader>
         </encoder>
     </appender>

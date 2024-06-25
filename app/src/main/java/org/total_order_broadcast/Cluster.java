@@ -183,6 +183,7 @@ public class Cluster {
             in.next(); // Consume the invalid input
         }
     }
+    System.out.println("\nAction chosen: [" + value + "] - " + actions[value]);
     return value;
   }
 }
