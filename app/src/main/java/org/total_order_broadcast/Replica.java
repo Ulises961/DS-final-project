@@ -27,6 +27,7 @@ public class Replica extends Node {
   private int nextHop = -1;
   private boolean hasReceivedElectionMessage = false;
   private boolean deferringMessages = false;
+  private Integer currentRequest = 0;
   
   // Replica requests that have not been yet put to vote
   private List<WriteDataMsg> pendingMsg;
@@ -48,7 +49,7 @@ public class Replica extends Node {
     logger = LoggerFactory.getLogger(Replica.class);
 
     contextMap = new HashMap<>();
-    contextMap.put("replicaId", getSelf().path().name());
+    contextMap.put("replicaId", String.valueOf(id));
 
     System.out.println("Replica " + id + " created");
   }
@@ -65,8 +66,7 @@ public class Replica extends Node {
   public void onCrash(CrashMsg msg){
     crash();
   }
-
-    // election message, this is what each replica receives/sends
+  // election message, this is what each replica receives/sends
   public static class ElectionMessage implements Serializable {
     public ActorRef proposedCoordinator;
     Map<EpochSeqNum, Integer> updateHistory;
@@ -110,6 +110,7 @@ public class Replica extends Node {
       .match(FlushMsg.class, this::onFlushMessage)
       .match(SyncMessage.class, this::onSyncMessageReceipt)
       .match(ViewChangeMsg.class, this::onViewChange)
+      .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (crashed)"))
       .build();
   }
   
@@ -121,6 +122,7 @@ public class Replica extends Node {
     }
   }
   
+  // TODO: check if this is correct
   public void onTimeout(UpdateTimeOut msg) {
     onHeartbeatTimeout(new HeartbeatTimeout());
     setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
@@ -159,28 +161,6 @@ public class Replica extends Node {
     }
   }
 
-  // SOLVE PENDING MESSAGES FROM THE REPLICA BEFORE CHANGING VIEW
-  public void onPendingWriteMessage(PendingWriteMsg msg) {
-    if (isCoordinator()) {
-      requestUpdate(msg.value, msg.sender);
-    }
-  }
-
-  // USED BY THE COORD TO MULTICAST THE UPDATE REQUEST
-  private void requestUpdate(Integer value, ActorRef sender) {
-    expectingAcks = true;
-    epochSeqNumPair.seqNum++;
-    EpochSeqNum esn = new EpochSeqNum(this.epochSeqNumPair.currentEpoch, this.epochSeqNumPair.seqNum);
-    logWithMDC("Epoch sequence number: " + esn);
-    multicast(new UpdateRequest(value, esn));
-
-    // Store in memory which replica initiated the request. 
-    // The writeOk includes the replica that initiated the request
-    // The replica will remove the message from its pending list once the writeOk is received
-    this.pendingRequests.put(esn, sender);
-    logWithMDC("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn);
-  }
-
   // CO-HORTS RECEIVE THIS AND SEND ACKS BACK TO THE COORDINATOR
   public void onUpdateRequest(UpdateRequest msg) {
     // Updates must be monotonically increasing within the latest epoch
@@ -217,20 +197,25 @@ public class Replica extends Node {
     updateTimeOut.cancel();
 
     // Check if the message is the next in sequence
-    if(msg.epochSeqNum.seqNum == this.epochSeqNumPair.seqNum + 1){
+    if(msg.epochSeqNum.seqNum == epochSeqNumPair.seqNum + 1){
       logWithMDC("Committing value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
-      
+
       // store the decision
       commitDecision(msg.value, msg.epochSeqNum);
+      
+      if(isCoordinator()){
+        pendingRequests.remove(msg.epochSeqNum);
+      }
 
       // Check if there are any pending writes that can now be committed
-      while(unstableWrites.containsKey(new EpochSeqNum(this.epochSeqNumPair.currentEpoch, this.epochSeqNumPair.seqNum + 1))){
-        WriteOk writeOk = unstableWrites.get(new EpochSeqNum(this.epochSeqNumPair.currentEpoch, this.epochSeqNumPair.seqNum + 1));
+      while(unstableWrites.containsKey(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1))){
+        WriteOk writeOk = unstableWrites.get(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1));
         logWithMDC("Committing value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum);
         commitDecision(writeOk.value, writeOk.epochSeqNum);
+        unstableWrites.remove(writeOk.epochSeqNum);
       }
     } else {
-      logWithMDC("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
+      logWithMDC("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum);
       // Defer commit until the correct sequence number is reached
       unstableWrites.put(msg.epochSeqNum, msg);
     } 
@@ -261,14 +246,42 @@ public class Replica extends Node {
     if (isCoordinator()) {
       multicast(new Heartbeat());
       
-      if(this.heartbeatTimeout != null) {
-        this.heartbeatTimeout.cancel();
+      if(heartbeatTimeout != null) {
+        heartbeatTimeout.cancel();
       }
-      heartbeatTimeout = setTimeout(this.HEARTBEAT_INTERVAL, new Heartbeat());
+      heartbeatTimeout = setTimeout(HEARTBEAT_INTERVAL, new Heartbeat());
 
     } else {
       renewHeartbeatTimeout();
     }
+  }
+
+  public void onPing(ICMPRequest msg) {
+    logWithMDC("Received ping from " + getSender().path().name());
+    getSender().tell(new ICMPResponse(), getSelf());
+  }
+
+  // USED BY THE COORD TO MULTICAST THE UPDATE REQUEST
+  private void requestUpdate(Integer value, ActorRef sender) {
+    expectingAcks = true;
+    currentRequest++;
+    EpochSeqNum esn = new EpochSeqNum(epochSeqNumPair.currentEpoch, currentRequest);
+    
+    logWithMDC("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn);
+    multicast(new UpdateRequest(value, esn));
+
+    // Store in memory which replica initiated the request. 
+    // The writeOk includes the replica that initiated the request
+    // The replica will remove the message from its pending list once the writeOk is received
+    pendingRequests.put(esn, sender);
+  }
+  
+  private void renewHeartbeatTimeout(){
+    if(heartbeatTimeout != null) {
+      heartbeatTimeout.cancel();
+    }
+    
+    heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
   }
 
   /*
@@ -277,7 +290,6 @@ public class Replica extends Node {
 
   // COORDINATOR CRASHED, THIS NODE IS THE ONE WHICH DETECTED THE CRASH, THUS THE INITIATOR OF THE ELECTION ALGO
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
-    System.out.println("Coordinator is not responding. Starting election." + getSelf().path().name());
     logWithMDC("Coordinator is not responding. Starting election.");
 
     getContext().become(electionMode());
@@ -289,7 +301,7 @@ public class Replica extends Node {
     Set<ActorRef> activeReplicas = new HashSet<>();
     activeReplicas.add(getSelf());
     flushes.put(epochSeqNumPair.currentEpoch, activeReplicas);
-    logWithMDC(flushes.toString());
+
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory, getSelf(), this.id, flushes), nextHop);
     // because of the assumption that there will ALWAYS be a quorum we can safely say that
     // next hop will NEVER be this node
@@ -308,29 +320,8 @@ public class Replica extends Node {
     // because nextHop timedout we try with the one after that: nextHop+1;
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.flushes),msg.next);
     // set timeout with nextHop+1
-    electionTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop, msg.flushes));
+    electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, msg.flushes));
     logger.warn(getSelf().path().name() + " Election timeout. Trying with next node: " + nextHop);
-  }
-
-
-  public void onPing(ICMPRequest msg) {
-    logWithMDC("Received ping from " + getSender().path().name());
-    getSender().tell(new ICMPResponse(), getSelf());
-  }
-
-  private boolean isCoordinator() {
-    if (this.coordinator == null) {
-      logger.error("Coordinator is not set");
-      return false;
-    }
-    return coordinator.equals(getSelf());
-  }
-
-  private void renewHeartbeatTimeout(){
-    if(this.heartbeatTimeout != null) {
-      this.heartbeatTimeout.cancel();
-    }
-    heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
   }
 
   public void onFlushMessage(FlushMsg msg) {
@@ -357,28 +348,11 @@ public class Replica extends Node {
     logWithMDC( "Coordinator in the new view: " + coordinator.path().name());
     getContext().become(createReceive());
     deferringMessages = false;
-  }
-
-  /*
-  Logic: sort list of participants, get replica whose id > this.id, then try to send, if timeout update nextHop
-   */
-  private int sendElectionMsg(ElectionMessage electionMessage, int next){
-    if (next == -1) {
-      Collections.sort(participants);
-      int pos = participants.indexOf(getSelf());
-      participants.get((pos + 1) % participants.size()).tell(electionMessage, getSelf());
-      return (pos + 1) % participants.size();
-    } else if (nextHopTimedOut){
-      participants.get((next+1) % participants.size()).tell(electionMessage, getSelf());
-      return (next + 1) % participants.size();
-    } else {
-      participants.get((next) % participants.size()).tell(electionMessage, getSelf());
-      return next % participants.size();
+    
+    if (isCoordinator()) {
+      multicast(new Heartbeat());
     }
-  }
 
-  public void updateCoordinator(ActorRef coordinator){
-    this.coordinator = coordinator;
   }
 
 
@@ -454,16 +428,54 @@ public class Replica extends Node {
 
       logWithMDC(" Received election message. Proposed coordinator: " + proposedCoordinatorID);
       sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.flushes), nextHop);
+      electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, electionMessage.flushes));
+    }
+  }
+  
+  // SOLVE PENDING MESSAGES FROM THE REPLICA BEFORE CHANGING VIEW
+  public void onPendingWriteMessage(PendingWriteMsg msg) {
+    if (isCoordinator()) {
+      requestUpdate(msg.value, msg.sender);
     }
   }
 
-  public boolean hasBeenUpdated(ElectionMessage msg){
+  private void updateCoordinator(ActorRef coordinator){
+    this.coordinator = coordinator;
+  }
+
+  private boolean hasBeenUpdated(ElectionMessage msg){
     return !msg.updateHistory.equals(this.updateHistory) || msg.proposedCoordinatorID != this.proposedCoordinatorID;
+  }
+
+  /**
+   *  Logic: sort list of participants, get replica whose id > this.id, then try to send, if timeout update nextHop
+   */
+  private int sendElectionMsg(ElectionMessage electionMessage, int next){
+    if (next == -1) {
+      Collections.sort(participants);
+      int pos = participants.indexOf(getSelf());
+      participants.get((pos + 1) % participants.size()).tell(electionMessage, getSelf());
+      return (pos + 1) % participants.size();
+    } else if (nextHopTimedOut){
+      participants.get((next+1) % participants.size()).tell(electionMessage, getSelf());
+      return (next + 1) % participants.size();
+    } else {
+      participants.get((next) % participants.size()).tell(electionMessage, getSelf());
+      return next % participants.size();
+    }
   }
 
   private void cleanUp(){
     this.proposedCoord = null;
     this.proposedCoordinatorID = -1;
+  }
+
+  private boolean isCoordinator() {
+    if (this.coordinator == null) {
+      logger.error("Coordinator is not set");
+      return false;
+    }
+    return coordinator.equals(getSelf());
   }
 
 }
