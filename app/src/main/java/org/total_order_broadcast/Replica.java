@@ -340,6 +340,7 @@ public class Replica extends Node {
     
     for(ActorRef participant : msg.proposedView){
       this.participants.add(participant);
+      epochSeqNumPair = msg.esn;
       logWithMDC("New participant added: " + participant.path().name());
     }
     coordinator = msg.coordinator;
