@@ -77,7 +77,7 @@ public class Cluster {
     ActorRef replica;
     ActorRef client;
     String[] clientNames = clients.stream().map(c -> c.path().name()).toArray(String[]::new);
-    String[] replicaNames = group.stream().map(node -> node.path().name()).toArray(String[]::new);
+    String[] replicaNames = group.stream().map(r -> r.path().name()).toArray(String[]::new);
 
     while (!exit) {
 
