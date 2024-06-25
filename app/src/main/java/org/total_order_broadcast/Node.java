@@ -67,7 +67,7 @@ public abstract class Node extends AbstractActor {
 
   final static int N_PARTICIPANTS = 3;
   final static int VOTE_TIMEOUT = 500; // timeout for the votes, ms
-  final static int DECISION_TIMEOUT = 1000; // timeout for the decision, ms
+  final static int DECISION_TIMEOUT = 100; // timeout for the decision, ms
   final static int RANDOM_DELAY = Math.round((VOTE_TIMEOUT + 50) / N_PARTICIPANTS); // timeout for the decision, ms
 
   public Node(int id) {
@@ -136,7 +136,6 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  // TODO change this according to the new implementation of ESN, also the paper only says that the nodes share the UPDATED value
   public static class WriteOk implements Serializable {
     public final Integer value;
     public final EpochSeqNum epochSeqNum;
@@ -332,7 +331,7 @@ public abstract class Node extends AbstractActor {
       currentValue = v;
       updateHistory.put(epochSeqNum, v);
 
-      print("Fixing value " + currentValue);
+      print("Committed value " + currentValue);
       print("Update History " + updateHistory.toString());
     }
   }
