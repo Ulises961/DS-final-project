@@ -69,10 +69,10 @@ public abstract class Node extends AbstractActor {
   // Hearbeat
   protected final int HEARTBEAT_TIMEOUT_DURATION = 2000;
   protected final int HEARTBEAT_INTERVAL = 1000;
-
+  protected final int ELECTION_TIMEOUT_DURATION = 5000;
   final static int N_PARTICIPANTS = 3;
   final static int VOTE_TIMEOUT = 500; // timeout for the votes, ms
-  final static int DECISION_TIMEOUT = 100; // timeout for the decision, ms
+  final static int DECISION_TIMEOUT = 5000; // timeout for the decision, ms
   final static int RANDOM_DELAY = Math.round((VOTE_TIMEOUT + 50) / N_PARTICIPANTS); // timeout for the decision, ms
 
   protected Logger logger; 
@@ -199,6 +199,7 @@ public abstract class Node extends AbstractActor {
   public static class ElectionTimeout extends Timeout {
     int next;
     Map<Integer,Set<ActorRef>> flushes;
+
     public ElectionTimeout(int next, Map<Integer,Set<ActorRef>> flushes) {
       this.next = next;
       this.flushes = flushes;
@@ -332,7 +333,7 @@ public abstract class Node extends AbstractActor {
     if (!hasDecided(epochSeqNum)) {
       currentValue = v;
       updateHistory.put(epochSeqNum, v);
-
+      epochSeqNumPair = epochSeqNum;
       print("Committed value " + currentValue);
       print("Update History " + updateHistory.toString());
     }
