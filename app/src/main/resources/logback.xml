@@ -1,5 +1,5 @@
 <configuration>
-    <property name="LOG_DIR" value="build/logs" />
+    <property name="LOG_DIR" value="./build/logs" />
     <property name="LOGNAME" value="cluster" />
 
     <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
