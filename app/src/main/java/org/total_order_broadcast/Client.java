@@ -19,7 +19,7 @@ public class Client extends Node {
     private ActorRef server = null;
     private HashSet<ActorRef> participants;
     public static int nextReplica = 0;
-    public static int clientNumber = N_PARTICIPANTS + 1;
+    public static int clientNumber = 1;
     private Cancellable readTimeout;
     private Cancellable serverLivenessTimeout;
     private LinkedList<UpdateRequest> updates = new LinkedList<>();
@@ -31,7 +31,7 @@ public class Client extends Node {
         this.logger = LoggerFactory.getLogger(Client.class);
 
         contextMap = new HashMap<>();
-        contextMap.put("replicaId", getSelf().path().name());
+        contextMap.put("replicaId", String.valueOf(id));
     }
 
     static public Props props() {
