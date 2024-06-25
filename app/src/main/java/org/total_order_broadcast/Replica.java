@@ -377,7 +377,11 @@ public class Replica extends Node {
       cleanUp();
       if (isCoordinator()){
         multicast(new SyncMessage(updateHistory));
+        multicast(new Heartbeat());
         this.proposedView.put(epochSeqNumPair,electionMessage.flushes.get(epochSeqNumPair.currentEpoch));
+      }else{
+        // set timeout in case new coordinator also crashed
+        heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
       }
     } else {
       // Someone else has discovered a crashed coordinator no need to trigger another election
