@@ -10,22 +10,18 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
-
 import scala.concurrent.duration.Duration;
 import scala.util.Random;
-
-import org.slf4j.LoggerFactory;
-import org.slf4j.Logger;
-import org.slf4j.MDC;
 
 public abstract class Node extends AbstractActor {
 
   protected int id; // node ID
-
-  protected List<ActorRef> participants; // list of participant nodes
 
   protected int quorum;
 
@@ -57,23 +53,23 @@ public abstract class Node extends AbstractActor {
   // cancellation of the heartbeat timeout
   protected Cancellable heartbeatTimeout;
 
+  // next heartbeat
+  protected Cancellable heartbeat;
+
   protected Cancellable electionTimeout;
 
   // to include delays in the messages
   private Random rnd = new Random();
 
-  // TODO missed updates message to bring replicas up to date, from the
-  // coordinator
   protected  Map<Integer, Set<ActorRef>> flushes;
 
   // Hearbeat
-  protected final int HEARTBEAT_TIMEOUT_DURATION = 2000;
-  protected final int HEARTBEAT_INTERVAL = 1000;
+  protected final int HEARTBEAT_TIMEOUT_DURATION = 6000;
+  protected final int HEARTBEAT_INTERVAL = 2000;
   protected final int ELECTION_TIMEOUT_DURATION = 5000;
-  final static int N_PARTICIPANTS = 3;
+  final static int N_PARTICIPANTS = 5;
   final static int VOTE_TIMEOUT = 500; // timeout for the votes, ms
   final static int DECISION_TIMEOUT = 5000; // timeout for the decision, ms
-  final static int RANDOM_DELAY = Math.round((VOTE_TIMEOUT + 50) / N_PARTICIPANTS); // timeout for the decision, ms
 
   protected Logger logger; 
 
@@ -94,7 +90,7 @@ public abstract class Node extends AbstractActor {
     logger = LoggerFactory.getLogger(Node.class);
   }
 
-  private void updateQuorum() {
+  protected void updateQuorum() {
     this.quorum = currentView.size() / 2 + 1;
   }
 
@@ -151,8 +147,7 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  public static class Timeout implements Serializable {
-  }
+  public static class Timeout implements Serializable {}
 
   public static class UpdateTimeOut extends Timeout {
     public final EpochSeqNum epochSeqNum;
@@ -272,13 +267,12 @@ public abstract class Node extends AbstractActor {
   protected abstract void onRecovery(Recovery msg);
 
   public void setGroup(JoinGroupMsg sm) {
-    participants = new ArrayList<>();
     for (ActorRef b : sm.group) {
-      this.participants.add(b);
+      currentView.add(b);
     }
 
-    logWithMDC( "Starting with " + sm.group.size() + " peer(s)");
-    logWithMDC( "Participants: " + participants.toString());
+    log( "Starting with " + sm.group.size() + " peer(s)", LogLevel.INFO);
+    log( "Participants: " + currentView.toString(), LogLevel.INFO);
   }
 
   // emulate a crash and a recovery in a given time
@@ -289,8 +283,8 @@ public abstract class Node extends AbstractActor {
 
   public Receive crashed() {
     return receiveBuilder()
-            .matchAny(msg -> {})
-            .build();
+      .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (crashed)"))
+      .build();
   }
 
   // emulate a delay of d milliseconds
@@ -302,17 +296,29 @@ public abstract class Node extends AbstractActor {
   }
 
   public void multicast(Serializable m) {
-    for (ActorRef p : participants) {
-      delay(RANDOM_DELAY);
+    for (ActorRef p : currentView) {
+      int randomDelay = randomDelay();
+      delay(randomDelay);
       p.tell(m, getSelf());
 
     }
   }
 
+  public void multicastExcept(Serializable m, ActorRef except) {
+    for (ActorRef p : currentView) {
+      if (!p.equals(except)) {
+        int randomDelay = randomDelay();
+        delay(randomDelay);
+        p.tell(m, getSelf());
+      }
+    }
+  }
+
   // a multicast implementation that crashes after sending the first message
   public void multicastAndCrash(Serializable m) {
-    for (ActorRef p : participants) {
-      delay(RANDOM_DELAY);
+    for (ActorRef p : currentView) {
+      int randomDelay = randomDelay();
+      delay(randomDelay);
       p.tell(m, getSelf());
       crash();
       return;
@@ -356,34 +362,12 @@ public abstract class Node extends AbstractActor {
   }
 
     // Utility method for logging with MDC context
-    protected void logWithMDC(String message) {
-        try {
-            LogLevel level = LogLevel.INFO;
-            // Set MDC logContext
-            contextMap.forEach(MDC::put);
-            // Log the message at the specified level
-            switch (level) {
-                case INFO:
-                    logger.info(message);
-                    break;
-                case WARN:
-                    logger.warn(message);
-                    break;
-                case ERROR:
-                    logger.error(message);
-                    break;
-                case DEBUG:
-                    logger.debug(message);
-                    break;
-            }
-        } finally {
-            // Clear MDC context
-            MDC.clear();
-        }
+    protected void log(String message, LogLevel level) {
+      Cluster.logWithMDC(message, contextMap, logger, level);
     }
 
-    // Define LogLevel as an enum for convenience
-    enum LogLevel {
-        INFO, WARN, ERROR, DEBUG
+    private int randomDelay() {
+        int upperbound = Math.round((VOTE_TIMEOUT + 50) / N_PARTICIPANTS); // random delay
+        return rnd.nextInt(upperbound);
     }
 }

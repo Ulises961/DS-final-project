@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +39,14 @@ public class Client extends Node {
         return Props.create(Client.class, Client::new);
     }
 
+    public ActorRef getServer(){
+        return server;
+    }
+
+    public List<ActorRef> getParticipants(){
+        return new LinkedList<>(participants);
+    }
+
     public static class UpdateRequest extends WriteDataMsg {
         public UpdateRequest(Integer value, ActorRef sender, boolean shouldCrash){
             super(value, sender, shouldCrash);
@@ -65,7 +74,7 @@ public class Client extends Node {
             this.participants.add(b);
           }
         }
-        logWithMDC( "starting with " + sm.group.size() + " peer(s)");
+        log( "starting with " + sm.group.size() + " peer(s)", LogLevel.INFO);
       }
 
     @Override
@@ -87,7 +96,7 @@ public class Client extends Node {
     }
 
     public void onTimeout(Timeout msg) {
-        logWithMDC("Server timeout, changing server " + server.path().name());
+        log("Server timeout, changing server " + server.path().name(), LogLevel.ERROR);
         participants.remove(server);
         assignServer();
         onRequestRead(new RequestRead());

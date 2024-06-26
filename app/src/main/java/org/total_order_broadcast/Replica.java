@@ -63,6 +63,14 @@ public class Replica extends Node {
     return Props.create(Replica.class, () -> new Replica(id));
   }
 
+  public ActorRef getCoordinator() {
+    return coordinator;
+  }
+
+  public List<ActorRef> getCurrentView() {
+    return new LinkedList<>(currentView);
+  }
+
   public void onCrash(CrashMsg msg){
     crash();
   }
@@ -97,7 +105,8 @@ public class Replica extends Node {
         .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
         .match(ICMPRequest.class, this::onPing)
         .match(CrashMsg.class, this::onCrash)
-        .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (normal mode)"))
+        .match(ElectionMessage.class, this::onElectionMessageReceipt)
+        .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.ERROR))
         .build();
       }
       
@@ -111,7 +120,7 @@ public class Replica extends Node {
       .match(FlushMsg.class, this::onFlushMessage)
       .match(SyncMessage.class, this::onSyncMessageReceipt)
       .match(ViewChangeMsg.class, this::onViewChange)
-      .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (election mode)"))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.ERROR))
       .build();
   }
   
@@ -123,17 +132,15 @@ public class Replica extends Node {
     }
   }
   
-  // TODO: check if this is correct
   public void onTimeout(UpdateTimeOut msg) {
+    // If the coordinator does not respond, the replica starts an election
     onHeartbeatTimeout(new HeartbeatTimeout());
-    setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
-
-    logWithMDC("Timeout for update request: " + msg.epochSeqNum);
+    log("Timeout for update request: " + msg.epochSeqNum, LogLevel.ERROR);
   }
   
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
     msg.sender.tell(new DataMsg(getValue()), getSelf());
-    logWithMDC("Read read from Client: " + getSender().path().name() + " Value returned: " + currentValue);
+    log("Read read from Client: " + getSender().path().name() + " Value returned: " + currentValue, LogLevel.INFO);
   }
 
   /*
@@ -145,20 +152,26 @@ public class Replica extends Node {
     // Defer messages during election. New messages make part of the next epoch
     if(deferringMessages) {
       deferredMsgSet.add(msg);
-      logWithMDC("Deferring message: " + msg.value);
+      log("Deferring message: " + msg.value, LogLevel.INFO);
     } else {
+      
       if (isCoordinator()) {
+        log("Received Write request", LogLevel.INFO);
         requestUpdate(msg.value, msg.sender);
       } else {
-        logWithMDC("Received update message from client: " + msg.value);
+        log("Received update message from client: " + msg.value, LogLevel.INFO);
+        log("Forwarding update message to coordinator: " + coordinator + " with value " + msg.value, LogLevel.INFO);
         // forward request to the coordinator, do not propagate the shouldCrash flag
         coordinator.tell(new WriteDataMsg(msg.value, msg.sender), getSelf());
-
-        logWithMDC("Forwarding update message to coordinator: " + coordinator + " with value " + msg.value );
+        
         // Keep message in memory as pending
         pendingMsg.add(msg);
-        logWithMDC("Pending message: " + msg.value);
+        log("Pending message: " + msg.value, LogLevel.INFO);
+        
+        // Set a timeout for the update request
+        updateTimeOut = setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(epochSeqNumPair));
       }
+      
 
       // The crash occurs only to the client's server
       if(msg.shouldCrash){
@@ -172,12 +185,13 @@ public class Replica extends Node {
     // Updates must be monotonically increasing within the latest epoch
     expectingAcks = true;
     coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
-    logWithMDC("Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum);
+    log("Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum, LogLevel.INFO);
     
     if(updateTimeOut != null) {
       updateTimeOut.cancel();
     }
 
+    // Wait for a WriteOk from the coordinator 
     updateTimeOut = setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
     
     // Assume the heartbeat is received
@@ -190,7 +204,7 @@ public class Replica extends Node {
       ActorRef sender = getSender();
       receivedAcks.add(sender);
       if (receivedAcks.size() >= quorum) { // enough acks received, now send WRITEOK message
-        logWithMDC("Quorum reached, sending Ok for value " + ack.value);
+        log("Quorum reached, sending Ok for value " + ack.value, LogLevel.INFO);
         ActorRef proposer = pendingRequests.get(ack.epochSeqNum);
         multicast(new WriteOk(ack.value, ack.epochSeqNum, proposer));
         expectingAcks = false; // update phase completed, no more acks expected
@@ -200,11 +214,16 @@ public class Replica extends Node {
 
   // ALL'S WELL THAT ENDS WELL: COMMIT UPDATE
   public void onWriteOk(WriteOk msg) {
+    
+    // Cancel the timeout for the update request
     updateTimeOut.cancel();
+
+    // Assume the heartbeat is received
+    renewHeartbeatTimeout();
 
     // Check if the message is the next in sequence
     if(msg.epochSeqNum.seqNum == epochSeqNumPair.seqNum + 1){
-      logWithMDC("Committing value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
+      log("Committing value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, LogLevel.INFO);
 
       // store the decision
       commitDecision(msg.value, msg.epochSeqNum);
@@ -216,23 +235,25 @@ public class Replica extends Node {
       // Check if there are any pending writes that can now be committed
       while(unstableWrites.containsKey(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1))){
         WriteOk writeOk = unstableWrites.get(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1));
-        logWithMDC("Committing value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum);
+        log("Committing deferred value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum, LogLevel.INFO);
         commitDecision(writeOk.value, writeOk.epochSeqNum);
         unstableWrites.remove(writeOk.epochSeqNum);
       }
+    } else if(msg.epochSeqNum.seqNum >= epochSeqNumPair.seqNum){
+      log("Message already committed", LogLevel.INFO);
     } else {
-      logWithMDC("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum);
+      log("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, LogLevel.INFO);
       // Defer commit until the correct sequence number is reached
       unstableWrites.put(msg.epochSeqNum, msg);
     } 
 
     // Remove the message from the pending list
-    if(msg.proposer.equals(msg.proposer)){
+    if(msg.proposer.equals(getSelf())){
       Iterator<WriteDataMsg> iterator = pendingMsg.iterator();
       while (iterator.hasNext()) {
           WriteDataMsg currentMsg = iterator.next();
           if (currentMsg.value == msg.value) {
-              logWithMDC("Removing pending message: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum);
+              log("Removing pending message: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, LogLevel.INFO);
               iterator.remove();
               break; // Exit the loop after removing the first match
           }
@@ -242,28 +263,20 @@ public class Replica extends Node {
         // Remove the message from the pending requests list
         pendingRequests.remove(msg.epochSeqNum);
       } 
-
     } 
-    // Assume the heartbeat is received
-    renewHeartbeatTimeout();
   }
 
   public void onHeartbeat(Heartbeat msg) {
     if (isCoordinator()) {
-      multicast(new Heartbeat());
-      
-      if(heartbeatTimeout != null) {
-        heartbeatTimeout.cancel();
-      }
-      heartbeatTimeout = setTimeout(HEARTBEAT_INTERVAL, new Heartbeat());
-
+      multicastExcept(new Heartbeat(), getSelf());
+      heartbeat = setTimeout(HEARTBEAT_INTERVAL, new Heartbeat());
     } else {
       renewHeartbeatTimeout();
     }
   }
 
   public void onPing(ICMPRequest msg) {
-    logWithMDC("Received ping from " + getSender().path().name());
+    log("Received ping from " + getSender().path().name(), LogLevel.INFO);
     getSender().tell(new ICMPResponse(), getSelf());
   }
 
@@ -273,7 +286,7 @@ public class Replica extends Node {
     currentRequest++;
     EpochSeqNum esn = new EpochSeqNum(epochSeqNumPair.currentEpoch, currentRequest);
     
-    logWithMDC("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn);
+    log("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn, LogLevel.INFO);
     multicast(new UpdateRequest(value, esn));
 
     // Store in memory which replica initiated the request. 
@@ -286,8 +299,9 @@ public class Replica extends Node {
     if(heartbeatTimeout != null) {
       heartbeatTimeout.cancel();
     }
-    
-    heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
+    if(!isCoordinator()){
+      heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
+    }
   }
 
   /*
@@ -296,7 +310,7 @@ public class Replica extends Node {
 
   // COORDINATOR CRASHED, THIS NODE IS THE ONE WHICH DETECTED THE CRASH, THUS THE INITIATOR OF THE ELECTION ALGO
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
-    logWithMDC("Coordinator is not responding. Starting election.");
+    log("Coordinator is not responding. Starting election.", LogLevel.ERROR);
 
     getContext().become(electionMode());
     deferringMessages = true;
@@ -337,29 +351,31 @@ public class Replica extends Node {
       if (flushedReplicas.size() >= proposedView.size()) {
         multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch++, 0), proposedView.get(epochSeqNumPair), coordinator));
         currentRequest = 0;
-        logWithMDC("View change message sent");
+        log("View change message sent", LogLevel.INFO);
       }
     }
   }
 
   public void onViewChange(ViewChangeMsg msg) {
-    participants.clear();
+    currentView.clear();
+
     epochSeqNumPair = msg.esn;
 
     for(ActorRef participant : msg.proposedView){
-      this.participants.add(participant);
+      this.currentView.add(participant);
+      currentView.add(participant);
       epochSeqNumPair = msg.esn;
-      logWithMDC("New participant added: " + participant.path().name());
+      log("New participant added: " + participant.path().name(), LogLevel.INFO);
     }
     coordinator = msg.coordinator;
 
-    logWithMDC( "Participants in the new view: " + participants.toString());
-    logWithMDC( "Coordinator in the new view: " + coordinator.path().name());
+    log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
+    log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
     getContext().become(createReceive());
     deferringMessages = false;
     
     if (isCoordinator()) {
-      multicast(new Heartbeat());
+      updateQuorum();
     }
 
   }
@@ -438,7 +454,7 @@ public class Replica extends Node {
         proposedCoord = proposedCoordinatorID == this.id ? getSelf() : proposedCoord;
       }
 
-      logWithMDC(" Received election messagefrom " +getSender() + ". Proposed coordinator: " + proposedCoordinatorID);
+      log(" Received election message from " +getSender() + ". Proposed coordinator: " + proposedCoordinatorID, LogLevel.INFO);
       sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.flushes), nextHop);
       electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, electionMessage.flushes));
     }
@@ -463,6 +479,7 @@ public class Replica extends Node {
    *  Logic: sort list of participants, get replica whose id > this.id, then try to send, if timeout update nextHop
    */
   private int sendElectionMsg(ElectionMessage electionMessage, int next){
+    List<ActorRef> participants = new LinkedList<>(currentView);
     if (next == -1) {
       Collections.sort(participants);
       int pos = participants.indexOf(getSelf());

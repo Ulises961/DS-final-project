@@ -4,21 +4,29 @@ import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 
 import java.util.List;
+import java.util.Map;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import org.slf4j.MDC;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.total_order_broadcast.Client.RequestRead;
 import org.total_order_broadcast.Node.CrashMsg;
 import org.total_order_broadcast.Node.JoinGroupMsg;
 import org.total_order_broadcast.Node.WriteDataMsg;
 
 public class Cluster {
+  private static Map<String, String> contextMap =  new HashMap<>();
 
+  private static final Logger logger = LoggerFactory.getLogger(Cluster.class);
   public static void main(String[] args) {
 
     Scanner in = new Scanner(System.in);
+    contextMap.put("replicaId", String.valueOf("system"));
 
     // Create the actor system
     final ActorSystem system = ActorSystem.create("vssystem");
@@ -184,7 +192,37 @@ public class Cluster {
             in.next(); // Consume the invalid input
         }
     }
-    System.out.println("\nAction chosen: [" + value + "] - " + actions[value]);
+    logWithMDC("Action chosen: [" + value + "] - " + actions[value],contextMap, logger, LogLevel.INFO);
     return value;
   }
+
+  public static void logWithMDC(String message, Map<String, String> contextMap, Logger logger, LogLevel level) {
+      try {
+            // Set MDC logContext
+            contextMap.forEach(MDC::put);
+            // Log the message at the specified level
+            switch (level) {
+                case INFO:
+                    logger.info(message);
+                    break;
+                case WARN:
+                    logger.warn(message);
+                    break;
+                case ERROR:
+                    logger.error(message);
+                    break;
+                case DEBUG:
+                    logger.debug(message);
+                    break;
+            }
+        } finally {
+            // Clear MDC context
+            MDC.clear();
+        }
+  }
+}
+
+// Define LogLevel as an enum for convenience
+enum LogLevel {
+  INFO, WARN, ERROR, DEBUG
 }
