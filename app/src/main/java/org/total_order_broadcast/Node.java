@@ -67,7 +67,7 @@ public abstract class Node extends AbstractActor {
   protected final int HEARTBEAT_TIMEOUT_DURATION = 6000;
   protected final int HEARTBEAT_INTERVAL = 2000;
   protected final int ELECTION_TIMEOUT_DURATION = 5000;
-  final static int N_PARTICIPANTS = 5;
+  final static int N_PARTICIPANTS = 2;
   final static int VOTE_TIMEOUT = 500; // timeout for the votes, ms
   final static int DECISION_TIMEOUT = 5000; // timeout for the decision, ms
 
@@ -246,19 +246,22 @@ public abstract class Node extends AbstractActor {
   }
 
   public static class CrashMsg implements Serializable {}
+  
   public static class ICMPRequest implements Serializable {}
+  
   public static class ICMPResponse implements Serializable {}
+  
   public static class FlushMsg implements Serializable {}
 
   public static class ICMPTimeout extends Timeout {}
   
   public static class UpdateMsg implements Serializable {
     public final EpochSeqNum epochSeqNum;
-
     public UpdateMsg(EpochSeqNum esn) {
       this.epochSeqNum = esn;
     }
   }
+  
   public void setValue(int value) {
     this.currentValue = value;
   }
