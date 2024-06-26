@@ -15,6 +15,7 @@ import org.slf4j.MDC;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.total_order_broadcast.Client.RequestRead;
+import org.total_order_broadcast.Client.Supervise;
 import org.total_order_broadcast.Node.CrashCoord;
 import org.total_order_broadcast.Node.CrashMsg;
 import org.total_order_broadcast.Node.JoinGroupMsg;
@@ -59,7 +60,7 @@ public class Cluster {
     ActorRef client_1 = system.actorOf(Client.props(), "client_1");
     ActorRef client_2 = system.actorOf(Client.props(), "client_2");
     
-    supervisor.tell(new Client.Supervise(), ActorRef.noSender());
+    supervisor.tell(new Supervise(), ActorRef.noSender());
 
     clients.add(client_1);
     clients.add(client_2);
@@ -137,7 +138,6 @@ public class Cluster {
             break;
           case 4:
             // Crash coordinator
-            // replicas forward to the coordinator
             supervisor.tell(new CrashCoord(), supervisor);
             break;
           case 5:

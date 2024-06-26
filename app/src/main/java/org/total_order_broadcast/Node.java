@@ -166,10 +166,12 @@ public abstract class Node extends AbstractActor {
   public static class JoinGroupMsg implements Serializable {
     public final List<ActorRef> group; // an array of group members
     public final ActorRef coordinator; // the coordinator
+    public final ActorRef supervisor; // the supervisor gets messages directly to the coordinator
 
-    public JoinGroupMsg(List<ActorRef> group, ActorRef coordinator) {
+    public JoinGroupMsg(List<ActorRef> group, ActorRef coordinator, ActorRef supervisor) {
       this.group = Collections.unmodifiableList(new ArrayList<>(group));
       this.coordinator = coordinator;
+      this.supervisor = supervisor;
     }
   }
 
@@ -285,12 +287,12 @@ public abstract class Node extends AbstractActor {
   // emulate a crash and a recovery in a given time
   public void crash() {
     getContext().become(crashed());
-    print("CRASH!!!");
+    log("CRASH!!!", LogLevel.ERROR);
   }
 
   public Receive crashed() {
     return receiveBuilder()
-      .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (crashed)"))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (crashed)", LogLevel.INFO))
       .build();
   }
 
@@ -347,8 +349,8 @@ public abstract class Node extends AbstractActor {
       currentValue = v;
       updateHistory.put(epochSeqNum, v);
       epochSeqNumPair = epochSeqNum;
-      print("Committed value " + currentValue);
-      print("Update History " + updateHistory.toString());
+      log("Committed value " + currentValue, LogLevel.INFO);
+      log("Update History " + updateHistory.toString(), LogLevel.DEBUG);
     }
   }
 

@@ -20,12 +20,28 @@ import akka.actor.Props;
 
 public class Replica extends Node {
 
+  // Keeps track of who is the coordinator
+  private ActorRef supervisor = null;
+
+  // The propsed coordinator for the next view
   private ActorRef proposedCoord = null;
+
+  // The coordinator id proposed in the election message
   private int proposedCoordinatorID;
+
+  // In election ring, the next replica might have crashed
   private boolean nextHopTimedOut = false;
+  
+  // Next Replica id to send the election message
   private int nextHop = -1;
+
+  //In the election ring, a replica has already received an election message
   private boolean hasReceivedElectionMessage = false;
+  
+  // In the election mode, the replicas defer messages until the new view is established
   private boolean deferringMessages = false;
+
+  // Keeps trackof the request number for the current epoch
   private Integer currentRequest = 0;
   
   // Replica requests that have not been yet put to vote
@@ -38,9 +54,11 @@ public class Replica extends Node {
   private Map<EpochSeqNum, ActorRef> pendingRequests;
   
   private Cancellable updateTimeOut;
-
+  
+  // Coordinator keeps track if a request has reached quorum to improve liveliness
   private Map<EpochSeqNum, Boolean> requestHasQuorum;
 
+  // Coordinator keeps track of received acks for a request
   private Map<EpochSeqNum, Set<ActorRef>> receivedAcks;
   
   public Replica(int id) {
@@ -54,7 +72,7 @@ public class Replica extends Node {
     contextMap = new HashMap<>();
     contextMap.put("replicaId", String.valueOf(id));
 
-    System.out.println("Replica " + id + " created");
+    log("Replica " + id + " created", LogLevel.INFO);
   }
 
   @Override
@@ -72,12 +90,6 @@ public class Replica extends Node {
 
   public List<ActorRef> getCurrentView() {
     return new LinkedList<>(currentView);
-  }
-
-  public void onCrashCoord(CrashCoord crashCoord){
-    if (isCoordinator()){
-      crash();
-    }
   }
 
   public void onCrash(CrashMsg msg){
@@ -114,9 +126,8 @@ public class Replica extends Node {
         .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
         .match(ICMPRequest.class, this::onPing)
         .match(CrashMsg.class, this::onCrash)
-        .match(CrashCoord.class, this::onCrashCoord)
         .match(ElectionMessage.class, this::onElectionMessageReceipt)
-        .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.INFO))
+        .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.DEBUG))
         .build();
       }
       
@@ -130,15 +141,17 @@ public class Replica extends Node {
       .match(FlushMsg.class, this::onFlushMessage)
       .match(SyncMessage.class, this::onSyncMessageReceipt)
       .match(ViewChangeMsg.class, this::onViewChange)
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.INFO))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.DEBUG))
       .build();
   }
   
   public void onStartMessage(JoinGroupMsg msg) {
     setGroup(msg);
-    this.coordinator = msg.coordinator;
+    coordinator = msg.coordinator;
+    supervisor = msg.supervisor;
     if (isCoordinator()) {
       multicast(new Heartbeat());
+      supervisor.tell(new Client.SetCoordinator(), getSelf());
     }
   }
   
@@ -291,6 +304,7 @@ public class Replica extends Node {
   private boolean isAckExpected(EpochSeqNum epochSeqNum) {
     return requestHasQuorum.get(epochSeqNum);
   }
+  
   public void onPing(ICMPRequest msg) {
     log("Received ping from " + getSender().path().name(), LogLevel.DEBUG);
     getSender().tell(new ICMPResponse(), getSelf());
@@ -358,7 +372,7 @@ public class Replica extends Node {
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.flushes),msg.next);
     // set timeout with nextHop+1
     electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, msg.flushes));
-    logger.warn(getSelf().path().name() + " Election timeout. Trying with next node: " + nextHop);
+    log(" Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
   }
 
   public void onFlushMessage(FlushMsg msg) {
@@ -375,30 +389,30 @@ public class Replica extends Node {
 
   public void onViewChange(ViewChangeMsg msg) {
     currentView.clear();
-
     epochSeqNumPair = msg.esn;
 
     for(ActorRef participant : msg.proposedView){
-      this.currentView.add(participant);
       currentView.add(participant);
       epochSeqNumPair = msg.esn;
       log("New participant added: " + participant.path().name(), LogLevel.INFO);
     }
+
     coordinator = msg.coordinator;
 
     log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
     log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
     getContext().become(createReceive());
-    deferringMessages = false;
     
     if (isCoordinator()) {
       updateQuorum();
+      supervisor.tell(new Client.SetCoordinator(), getSelf());
     }
-
+    
   }
-
+  
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
+    deferringMessages = false;
 
     // Retry pending messages from current epoch
     for(WriteDataMsg msg : pendingMsg){
@@ -416,6 +430,7 @@ public class Replica extends Node {
       this.coordinator = proposedCoord;
       cleanUp();
       if (isCoordinator()){
+        deferringMessages = false;
         multicast(new SyncMessage(updateHistory));
         multicast(new Heartbeat());
         this.proposedView.put(epochSeqNumPair,electionMessage.flushes.get(epochSeqNumPair.currentEpoch));
