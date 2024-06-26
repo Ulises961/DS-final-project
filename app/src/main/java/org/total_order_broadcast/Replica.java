@@ -63,6 +63,12 @@ public class Replica extends Node {
     return Props.create(Replica.class, () -> new Replica(id));
   }
 
+  public void onCrashCoord(CrashCoord crashCoord){
+    if (isCoordinator()){
+      crash();
+    }
+  }
+
   public void onCrash(CrashMsg msg){
     crash();
   }
@@ -85,20 +91,21 @@ public class Replica extends Node {
   @Override
   public Receive createReceive() {
     return receiveBuilder()
-        .match(JoinGroupMsg.class, this::onStartMessage)
-        .match(UpdateTimeOut.class, this::onTimeout)
-        .match(Recovery.class, this::onRecovery)
-        .match(WriteDataMsg.class, this::onUpdateMessage)
-        .match(ReadDataMsg.class, this::onReadMessage)
-        .match(UpdateRequest.class, this::onUpdateRequest)
-        .match(UpdateAck.class, this::onUpdateAck)
-        .match(WriteOk.class, this::onWriteOk)
-        .match(Heartbeat.class, this::onHeartbeat)
-        .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
-        .match(ICMPRequest.class, this::onPing)
-        .match(CrashMsg.class, this::onCrash)
-        .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (normal mode)"))
-        .build();
+            .match(JoinGroupMsg.class, this::onStartMessage)
+            .match(UpdateTimeOut.class, this::onTimeout)
+            .match(Recovery.class, this::onRecovery)
+            .match(WriteDataMsg.class, this::onUpdateMessage)
+            .match(ReadDataMsg.class, this::onReadMessage)
+            .match(UpdateRequest.class, this::onUpdateRequest)
+            .match(UpdateAck.class, this::onUpdateAck)
+            .match(WriteOk.class, this::onWriteOk)
+            .match(Heartbeat.class, this::onHeartbeat)
+            .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
+            .match(ICMPRequest.class, this::onPing)
+            .match(CrashMsg.class, this::onCrash)
+            .match(CrashCoord.class, this::onCrashCoord)
+            .matchAny(msg -> System.out.println(getSelf().path().name() + " ignoring " + msg.getClass().getSimpleName() + " (normal mode)"))
+            .build();
       }
       
     public Receive electionMode() {

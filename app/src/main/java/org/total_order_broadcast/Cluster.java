@@ -123,7 +123,10 @@ public class Cluster {
             break;
           case 4:
             // Crash coordinator
-            group.get(0).tell(new CrashMsg(), group.get(0));
+            // replicas forward to the coordinator
+            for (ActorRef node : group) {
+              node.tell(new Node.CrashCoord(), node);
+            }
             break;
           case 5:
             // Update and crash
