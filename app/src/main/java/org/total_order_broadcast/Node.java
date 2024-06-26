@@ -38,7 +38,7 @@ public abstract class Node extends AbstractActor {
 
   protected Set<ActorRef> currentView;
 
-  // each view has is assocaited w/ an Epoch
+  // each view is associated w/ an Epoch
   protected final Map<EpochSeqNum, Set<ActorRef>> proposedView;
 
   // last sequence number for each node message (to avoid delivering duplicates)
@@ -104,6 +104,10 @@ public abstract class Node extends AbstractActor {
       this.group = Collections.unmodifiableList(new ArrayList<>(group));
       this.coordinator = coordinator;
     }
+  }
+
+  public static class CrashCoord implements Serializable {
+    // nothing here
   }
 
   public static class UpdateRequest implements Serializable {

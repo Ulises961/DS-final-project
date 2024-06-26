@@ -71,6 +71,12 @@ public class Replica extends Node {
     return new LinkedList<>(currentView);
   }
 
+  public void onCrashCoord(CrashCoord crashCoord){
+    if (isCoordinator()){
+      crash();
+    }
+  }
+
   public void onCrash(CrashMsg msg){
     crash();
   }
@@ -167,7 +173,7 @@ public class Replica extends Node {
         // Keep message in memory as pending
         pendingMsg.add(msg);
         log("Pending message: " + msg.value, LogLevel.INFO);
-        
+
         // Set a timeout for the update request
         updateTimeOut = setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(epochSeqNumPair));
       }
