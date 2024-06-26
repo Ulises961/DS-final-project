@@ -19,10 +19,9 @@ import akka.actor.Props;
 
 
 public class Replica extends Node {
-  HashSet<ActorRef> receivedAcks;
+
   private ActorRef proposedCoord = null;
   private int proposedCoordinatorID;
-  private boolean expectingAcks = false;
   private boolean nextHopTimedOut = false;
   private int nextHop = -1;
   private boolean hasReceivedElectionMessage = false;
@@ -39,15 +38,19 @@ public class Replica extends Node {
   private Map<EpochSeqNum, ActorRef> pendingRequests;
   
   private Cancellable updateTimeOut;
+
+  private Map<EpochSeqNum, Boolean> requestHasQuorum;
+
+  private Map<EpochSeqNum, Set<ActorRef>> receivedAcks;
   
   public Replica(int id) {
     super(id);
-    this.receivedAcks = new HashSet<>();
+    receivedAcks = new HashMap<>();
     this.pendingRequests = new HashMap<>();
     this.pendingMsg = new LinkedList<>();
     this.unstableWrites = new HashMap<>();
     logger = LoggerFactory.getLogger(Replica.class);
-
+    requestHasQuorum = new HashMap<>();
     contextMap = new HashMap<>();
     contextMap.put("replicaId", String.valueOf(id));
 
@@ -111,8 +114,9 @@ public class Replica extends Node {
         .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
         .match(ICMPRequest.class, this::onPing)
         .match(CrashMsg.class, this::onCrash)
+        .match(CrashCoord.class, this::onCrashCoord)
         .match(ElectionMessage.class, this::onElectionMessageReceipt)
-        .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.ERROR))
+        .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.INFO))
         .build();
       }
       
@@ -126,7 +130,7 @@ public class Replica extends Node {
       .match(FlushMsg.class, this::onFlushMessage)
       .match(SyncMessage.class, this::onSyncMessageReceipt)
       .match(ViewChangeMsg.class, this::onViewChange)
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.ERROR))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.INFO))
       .build();
   }
   
@@ -140,8 +144,8 @@ public class Replica extends Node {
   
   public void onTimeout(UpdateTimeOut msg) {
     // If the coordinator does not respond, the replica starts an election
+    log("Timeout for update request: " + msg.epochSeqNum, LogLevel.INFO);
     onHeartbeatTimeout(new HeartbeatTimeout());
-    log("Timeout for update request: " + msg.epochSeqNum, LogLevel.ERROR);
   }
   
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
@@ -160,21 +164,23 @@ public class Replica extends Node {
       deferredMsgSet.add(msg);
       log("Deferring message: " + msg.value, LogLevel.INFO);
     } else {
-      
       if (isCoordinator()) {
-        log("Received Write request", LogLevel.INFO);
+        log("Received Write request from " + getSender().path().name() + " with value " + msg.value, LogLevel.INFO);
         requestUpdate(msg.value, msg.sender);
       } else {
-        log("Received update message from client: " + msg.value, LogLevel.INFO);
-        log("Forwarding update message to coordinator: " + coordinator + " with value " + msg.value, LogLevel.INFO);
+        log("Received update message from client " + msg.sender.path().name() + " with value: " + msg.value, LogLevel.INFO);
+        log("Forwarding update message to coordinator: " + coordinator.path().name() + " with value " + msg.value, LogLevel.DEBUG);
         // forward request to the coordinator, do not propagate the shouldCrash flag
         coordinator.tell(new WriteDataMsg(msg.value, msg.sender), getSelf());
         
         // Keep message in memory as pending
         pendingMsg.add(msg);
-        log("Pending message: " + msg.value, LogLevel.INFO);
+        log("Pending message: " + msg.value, LogLevel.DEBUG);
 
         // Set a timeout for the update request
+        if(updateTimeOut != null) {
+          updateTimeOut.cancel();
+        }
         updateTimeOut = setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(epochSeqNumPair));
       }
       
@@ -189,9 +195,9 @@ public class Replica extends Node {
   // CO-HORTS RECEIVE THIS AND SEND ACKS BACK TO THE COORDINATOR
   public void onUpdateRequest(UpdateRequest msg) {
     // Updates must be monotonically increasing within the latest epoch
-    expectingAcks = true;
-    coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
     log("Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum, LogLevel.INFO);
+    requestHasQuorum.put(msg.epochSeqNum, true);
+    coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
     
     if(updateTimeOut != null) {
       updateTimeOut.cancel();
@@ -206,14 +212,15 @@ public class Replica extends Node {
 
   // COORDINATOR RECEIVES ACKS AND SENDS WRITEOK
   public void onUpdateAck(UpdateAck ack) {
-    if (expectingAcks) {
+    if (isAckExpected(ack.epochSeqNum)) {
       ActorRef sender = getSender();
-      receivedAcks.add(sender);
-      if (receivedAcks.size() >= quorum) { // enough acks received, now send WRITEOK message
+      Set<ActorRef> voters = receivedAcks.get(ack.epochSeqNum);
+      voters.add(sender);
+      if (voters.size() >= quorum) { // enough acks received, now send WRITEOK message
         log("Quorum reached, sending Ok for value " + ack.value, LogLevel.INFO);
         ActorRef proposer = pendingRequests.get(ack.epochSeqNum);
         multicast(new WriteOk(ack.value, ack.epochSeqNum, proposer));
-        expectingAcks = false; // update phase completed, no more acks expected
+        requestHasQuorum.put(ack.epochSeqNum,true); // update phase completed, no more acks expected
       }
     }
   }
@@ -246,7 +253,7 @@ public class Replica extends Node {
         unstableWrites.remove(writeOk.epochSeqNum);
       }
     } else if(msg.epochSeqNum.seqNum >= epochSeqNumPair.seqNum){
-      log("Message already committed", LogLevel.INFO);
+      log("Message already committed " + msg.value + " seq num " + msg.epochSeqNum, LogLevel.INFO);
     } else {
       log("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, LogLevel.INFO);
       // Defer commit until the correct sequence number is reached
@@ -281,17 +288,21 @@ public class Replica extends Node {
     }
   }
 
+  private boolean isAckExpected(EpochSeqNum epochSeqNum) {
+    return requestHasQuorum.get(epochSeqNum);
+  }
   public void onPing(ICMPRequest msg) {
-    log("Received ping from " + getSender().path().name(), LogLevel.INFO);
+    log("Received ping from " + getSender().path().name(), LogLevel.DEBUG);
     getSender().tell(new ICMPResponse(), getSelf());
   }
 
   // USED BY THE COORD TO MULTICAST THE UPDATE REQUEST
   private void requestUpdate(Integer value, ActorRef sender) {
-    expectingAcks = true;
     currentRequest++;
     EpochSeqNum esn = new EpochSeqNum(epochSeqNumPair.currentEpoch, currentRequest);
-    
+    Set<ActorRef> acks = new HashSet<>();
+    receivedAcks.put(esn, acks);
+    requestHasQuorum.put(esn, false);
     log("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn, LogLevel.INFO);
     multicast(new UpdateRequest(value, esn));
 
@@ -316,7 +327,7 @@ public class Replica extends Node {
 
   // COORDINATOR CRASHED, THIS NODE IS THE ONE WHICH DETECTED THE CRASH, THUS THE INITIATOR OF THE ELECTION ALGO
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
-    log("Coordinator is not responding. Starting election.", LogLevel.ERROR);
+    log("Coordinator is not responding. Starting election.", LogLevel.INFO);
 
     getContext().become(electionMode());
     deferringMessages = true;
