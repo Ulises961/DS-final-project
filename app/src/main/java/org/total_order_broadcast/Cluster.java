@@ -15,6 +15,7 @@ import org.slf4j.MDC;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.total_order_broadcast.Client.RequestRead;
+import org.total_order_broadcast.Node.CrashCoord;
 import org.total_order_broadcast.Node.CrashMsg;
 import org.total_order_broadcast.Node.JoinGroupMsg;
 import org.total_order_broadcast.Node.WriteDataMsg;
@@ -45,9 +46,11 @@ public class Cluster {
       group.add(system.actorOf(Replica.props(i), "replica-" + i));
     }
 
+    ActorRef supervisor = system.actorOf(Client.props(), "supervisor");
+
     // Send join messages to the coordinator and the nodes to inform them of the
     // whole group
-    JoinGroupMsg start = new JoinGroupMsg(group, coordinator);
+    JoinGroupMsg start = new JoinGroupMsg(group, coordinator, supervisor);
 
     for (ActorRef peer : group) {
       peer.tell(start, ActorRef.noSender());
@@ -55,11 +58,13 @@ public class Cluster {
 
     ActorRef client_1 = system.actorOf(Client.props(), "client_1");
     ActorRef client_2 = system.actorOf(Client.props(), "client_2");
+    
+    supervisor.tell(new Client.Supervise(), ActorRef.noSender());
+
     clients.add(client_1);
     clients.add(client_2);
 
     client_1.tell(start, ActorRef.noSender());
-
     client_2.tell(start, ActorRef.noSender());
 
     try {
@@ -68,7 +73,7 @@ public class Cluster {
       e.printStackTrace();
     }
 
-    inputContinue(in, clients, group);
+    inputContinue(in, clients, group, supervisor);
 
     // system shutdown
     system.terminate();
@@ -76,7 +81,7 @@ public class Cluster {
 
   }
 
-  public static void inputContinue(Scanner in, List<ActorRef> clients, List<ActorRef> group) {
+  public static void inputContinue(Scanner in, List<ActorRef> clients, List<ActorRef> group, ActorRef supervisor) {
     boolean exit = false;
     int updateValue = 1;
     int clientId = 0;
@@ -97,7 +102,8 @@ public class Cluster {
             "Crash",
             "Crash coordinator",
             "Update and crash",
-            "Concurrent updates"
+            "Concurrent updates",
+            "Coordinator crash in middle of update"
           };
 
         input = readInput(in, actions);
@@ -132,9 +138,7 @@ public class Cluster {
           case 4:
             // Crash coordinator
             // replicas forward to the coordinator
-            for (ActorRef node : group) {
-              node.tell(new Node.CrashCoord(), node);
-            }
+            supervisor.tell(new CrashCoord(), supervisor);
             break;
           case 5:
             // Update and crash
@@ -144,7 +148,7 @@ public class Cluster {
             boolean shouldCrash = true;
             client.tell(new WriteDataMsg(updateValue++, client, shouldCrash), client);
             break;
-            case 6:
+          case 6:
             // Concurrent updates
             int clientId1 = readInput(in, clientNames);
             String[] filteredClientNames = Stream.of(clientNames).filter(name -> !name.equals(clientNames[clientId1])).toArray(String[]::new);
@@ -154,6 +158,14 @@ public class Cluster {
             ActorRef client2 = clients.get(clientId2);
             client.tell(new WriteDataMsg(updateValue++, client), client);
             client2.tell(new WriteDataMsg(updateValue++, client2), client2);
+            break;
+          case 7:
+            // Concurrent updates
+            for(ActorRef c : clients){
+              c.tell(new WriteDataMsg(updateValue++, c), c);
+            }
+            supervisor.tell(new CrashCoord(), supervisor);
+            break;
           default:
             break;
         }

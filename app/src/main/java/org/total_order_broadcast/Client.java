@@ -39,13 +39,9 @@ public class Client extends Node {
         return Props.create(Client.class, Client::new);
     }
 
-    public ActorRef getServer(){
-        return server;
-    }
+    public static class SetCoordinator {}
 
-    public List<ActorRef> getParticipants(){
-        return new LinkedList<>(participants);
-    }
+    public static class Supervise {}
 
     public static class UpdateRequest extends WriteDataMsg {
         public UpdateRequest(Integer value, ActorRef sender, boolean shouldCrash){
@@ -55,7 +51,6 @@ public class Client extends Node {
 
     public void onStartMessage(JoinGroupMsg msg) {
         setGroup(msg);
-        this.coordinator = msg.coordinator;
         assignServer();
     }
 
@@ -96,7 +91,7 @@ public class Client extends Node {
     }
 
     public void onTimeout(Timeout msg) {
-        log("Server timeout, changing server " + server.path().name(), LogLevel.ERROR);
+        log("Server timeout, changing server " + server.path().name(), LogLevel.DEBUG);
         participants.remove(server);
         assignServer();
         onRequestRead(new RequestRead());
@@ -135,6 +130,21 @@ public class Client extends Node {
         pingServer();
     }
 
+    public void onSetCoordinator(SetCoordinator msg){
+        coordinator = getSender();
+        log("Coordinator set to " + coordinator.path().name(), LogLevel.INFO);
+    }
+
+    public void onSupervise(Supervise msg){
+        getContext().become(supervise());
+    }
+
+    public void onCrashCoord(CrashCoord msg){
+        if(coordinator != null) {
+            coordinator.tell(new CrashMsg(),getSelf());
+        }
+    }
+
     private void pingServer(){
         server.tell(new ICMPRequest(),getSelf());
         if(!checkingServer){
@@ -153,6 +163,14 @@ public class Client extends Node {
             .match(Timeout.class, this::onTimeout)
             .match(ICMPResponse.class, this::onPong)
             .match(ICMPTimeout.class, this::ICMPTimeout)
+            .match(Supervise.class, this::onSupervise)
+            .build();
+    }
+   
+    public Receive supervise() {
+        return receiveBuilder()
+            .match(SetCoordinator.class, this::onSetCoordinator)
+            .match(CrashCoord.class, this::onCrashCoord)
             .build();
     }
 
