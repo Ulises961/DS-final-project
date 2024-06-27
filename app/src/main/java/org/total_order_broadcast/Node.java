@@ -39,7 +39,7 @@ public abstract class Node extends AbstractActor {
   protected Set<ActorRef> currentView;
 
   // each view is associated w/ an Epoch
-  protected final Map<EpochSeqNum, Set<ActorRef>> proposedView;
+  protected final Map<Integer, Set<ActorRef>> proposedView;
 
   // last sequence number for each node message (to avoid delivering duplicates)
   protected final Map<ActorRef, Integer> membersSeqno;
@@ -90,8 +90,8 @@ public abstract class Node extends AbstractActor {
     logger = LoggerFactory.getLogger(Node.class);
   }
 
-  protected void updateQuorum() {
-    this.quorum = currentView.size() / 2 + 1;
+  protected void updateQuorum(int n) {
+    this.quorum = n / 2 + 1;
   }
 
 
@@ -199,11 +199,11 @@ public abstract class Node extends AbstractActor {
 
   public static class ElectionTimeout extends Timeout {
     int next;
-    Map<Integer,Set<ActorRef>> flushes;
+    Map<Integer,Set<ActorRef>> activeReplicas;
 
-    public ElectionTimeout(int next, Map<Integer,Set<ActorRef>> flushes) {
+    public ElectionTimeout(int next, Map<Integer,Set<ActorRef>> activeReplicas) {
       this.next = next;
-      this.flushes = flushes;
+      this.activeReplicas = activeReplicas;
     }
   }
 
@@ -264,6 +264,13 @@ public abstract class Node extends AbstractActor {
     }
   }
   
+  public static class FlushCompleteMsg implements Serializable {
+    public final int epoch;
+    public FlushCompleteMsg(int epoch) {
+      this.epoch = epoch;
+    }
+  }
+
   public void setValue(int value) {
     this.currentValue = value;
   }

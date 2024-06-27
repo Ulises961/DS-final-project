@@ -61,6 +61,9 @@ public class Replica extends Node {
   // Coordinator keeps track of received acks for a request
   private Map<EpochSeqNum, Set<ActorRef>> receivedAcks;
   
+  //Flushes for each epoch
+  protected final Map<Integer, Set<ActorRef>> flushes;
+
   public Replica(int id) {
     super(id);
     receivedAcks = new HashMap<>();
@@ -71,7 +74,7 @@ public class Replica extends Node {
     requestHasQuorum = new HashMap<>();
     contextMap = new HashMap<>();
     contextMap.put("replicaId", String.valueOf(id));
-
+    flushes = new HashMap<>();
     log("Replica " + id + " created", LogLevel.INFO);
   }
 
@@ -100,47 +103,52 @@ public class Replica extends Node {
     public ActorRef proposedCoordinator;
     Map<EpochSeqNum, Integer> updateHistory;
     int proposedCoordinatorID;
-    // group view flushes
-    protected final Map<Integer, Set<ActorRef>> flushes;
+    // Collected active replicas
+    protected final Map<Integer, Set<ActorRef>> activeReplicas;
 
-    public ElectionMessage(Map<EpochSeqNum, Integer> updateHistory, ActorRef coord, int proposedCoordinatorID, Map<Integer, Set<ActorRef>> flushes) {
+    public ElectionMessage(Map<EpochSeqNum, Integer> updateHistory, ActorRef coord, int proposedCoordinatorID, Map<Integer, Set<ActorRef>> activeReplicas) {
       this.updateHistory = updateHistory;
       this.proposedCoordinatorID = proposedCoordinatorID;
       this.proposedCoordinator = coord;
-      this.flushes = flushes;
+      this.activeReplicas = activeReplicas;
     }
   }
 
   @Override
   public Receive createReceive() {
     return receiveBuilder()
-        .match(JoinGroupMsg.class, this::onStartMessage)
-        .match(UpdateTimeOut.class, this::onTimeout)
-        .match(Recovery.class, this::onRecovery)
-        .match(WriteDataMsg.class, this::onUpdateMessage)
-        .match(ReadDataMsg.class, this::onReadMessage)
-        .match(UpdateRequest.class, this::onUpdateRequest)
-        .match(UpdateAck.class, this::onUpdateAck)
-        .match(WriteOk.class, this::onWriteOk)
-        .match(Heartbeat.class, this::onHeartbeat)
-        .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
-        .match(ICMPRequest.class, this::onPing)
-        .match(CrashMsg.class, this::onCrash)
-        .match(ElectionMessage.class, this::onElectionMessageReceipt)
-        .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.DEBUG))
-        .build();
-      }
+      .match(JoinGroupMsg.class, this::onStartMessage)
+      .match(UpdateTimeOut.class, this::onTimeout)
+      .match(Recovery.class, this::onRecovery)
+      .match(WriteDataMsg.class, this::onUpdateMessage)
+      .match(ReadDataMsg.class, this::onReadMessage)
+      .match(UpdateRequest.class, this::onUpdateRequest)
+      .match(UpdateAck.class, this::onUpdateAck)
+      .match(WriteOk.class, this::onWriteOk)
+      .match(Heartbeat.class, this::onHeartbeat)
+      .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
+      .match(ICMPRequest.class, this::onPing)
+      .match(CrashMsg.class, this::onCrash)
+      .match(ElectionMessage.class, this::onElectionMessageReceipt)
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.DEBUG))
+      .build();
+  }
       
-    public Receive electionMode() {
-      return receiveBuilder()
+  public Receive electionMode() {
+    return receiveBuilder()
       .match(ElectionTimeout.class, this::onElectionTimeout)
       .match(ElectionAck.class, this::onElectionAck)
       .match(ElectionMessage.class, this::onElectionMessageReceipt)
       .match(WriteDataMsg.class, this::onUpdateMessage)
       .match(PendingWriteMsg.class, this::onPendingWriteMessage)
-      .match(FlushMsg.class, this::onFlushMessage)
       .match(SyncMessage.class, this::onSyncMessageReceipt)
+      .match(UpdateRequest.class, this::onUpdateRequest)
+      .match(UpdateAck.class, this::onUpdateAck)
+      .match(WriteOk.class, this::onWriteOk)
+      .match(FlushMsg.class, this::onFlushMessage)
+      .match(FlushCompleteMsg.class, this::onFlushComplete)
       .match(ViewChangeMsg.class, this::onViewChange)
+      .match(CrashMsg.class, this::onCrash)
       .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.DEBUG))
       .build();
   }
@@ -179,12 +187,20 @@ public class Replica extends Node {
     } else {
       if (isCoordinator()) {
         log("Received Write request from " + getSender().path().name() + " with value " + msg.value, LogLevel.INFO);
-        requestUpdate(msg.value, msg.sender);
+        
+        // If the sender in the message is different from the sender of the message
+        // it was forwarded by a replica
+        if(getSender() != msg.sender){
+          requestUpdate(msg.value, getSender());
+        } else {
+          requestUpdate(msg.value, getSelf());
+        }
+
       } else {
         log("Received update message from client " + msg.sender.path().name() + " with value: " + msg.value, LogLevel.INFO);
         log("Forwarding update message to coordinator: " + coordinator.path().name() + " with value " + msg.value, LogLevel.DEBUG);
         // forward request to the coordinator, do not propagate the shouldCrash flag
-        coordinator.tell(new WriteDataMsg(msg.value, msg.sender), getSelf());
+        coordinator.tell(new WriteDataMsg(msg.value, getSelf()), getSelf());
         
         // Keep message in memory as pending
         pendingMsg.add(msg);
@@ -225,6 +241,7 @@ public class Replica extends Node {
 
   // COORDINATOR RECEIVES ACKS AND SENDS WRITEOK
   public void onUpdateAck(UpdateAck ack) {
+    log("Is Ack expected: " + isAckExpected(ack.epochSeqNum), LogLevel.INFO);
     if (isAckExpected(ack.epochSeqNum)) {
       ActorRef sender = getSender();
       Set<ActorRef> voters = receivedAcks.get(ack.epochSeqNum);
@@ -253,7 +270,7 @@ public class Replica extends Node {
 
       // store the decision
       commitDecision(msg.value, msg.epochSeqNum);
-      
+
       if(isCoordinator()){
         pendingRequests.remove(msg.epochSeqNum);
       }
@@ -273,9 +290,13 @@ public class Replica extends Node {
       unstableWrites.put(msg.epochSeqNum, msg);
     } 
 
+    log("Message proposer " + msg.proposer.path().name() + " self " + getSelf() + " are they equal? " + msg.proposer.equals(getSelf()), LogLevel.INFO);
+    
     // Remove the message from the pending list
     if(msg.proposer.equals(getSelf())){
       Iterator<WriteDataMsg> iterator = pendingMsg.iterator();
+      log("Pending messages: " + pendingMsg.toString(), LogLevel.INFO);
+
       while (iterator.hasNext()) {
           WriteDataMsg currentMsg = iterator.next();
           if (currentMsg.value == msg.value) {
@@ -289,6 +310,13 @@ public class Replica extends Node {
         // Remove the message from the pending requests list
         pendingRequests.remove(msg.epochSeqNum);
       } 
+
+      // After all messages have been committed, send a flush message to change the view
+      if(pendingMsg.isEmpty()){
+        log("All pending messages have been committed, tell coordinator " + coordinator.path().name(), LogLevel.INFO);
+        coordinator.tell(new FlushCompleteMsg(epochSeqNumPair.getCurrentEpoch()), getSelf());
+
+      }
     } 
   }
 
@@ -348,15 +376,15 @@ public class Replica extends Node {
 
     // active replicas are added to the flushes during the election, 
     //these will become the participants in the new epoch
-    Map<Integer, Set<ActorRef>> flushes = new HashMap<>();
+    Map<Integer, Set<ActorRef>> replicasInEpoch = new HashMap<>();
     Set<ActorRef> activeReplicas = new HashSet<>();
     activeReplicas.add(getSelf());
-    flushes.put(epochSeqNumPair.currentEpoch, activeReplicas);
+    replicasInEpoch.put(epochSeqNumPair.currentEpoch, activeReplicas);
 
-    nextHop = sendElectionMsg(new ElectionMessage(updateHistory, getSelf(), this.id, flushes), nextHop);
+    nextHop = sendElectionMsg(new ElectionMessage(updateHistory, getSelf(), this.id, replicasInEpoch), nextHop);
     // because of the assumption that there will ALWAYS be a quorum we can safely say that
     // next hop will NEVER be this node
-    electionTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop, flushes));
+    electionTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop, replicasInEpoch));
   }
 
   public void onElectionAck(ElectionAck ack) {
@@ -369,18 +397,22 @@ public class Replica extends Node {
   public void onElectionTimeout(ElectionTimeout msg) {
     nextHopTimedOut = true;
     // because nextHop timedout we try with the one after that: nextHop+1;
-    nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.flushes),msg.next);
+    nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.activeReplicas),msg.next);
     // set timeout with nextHop+1
-    electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, msg.flushes));
+    electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, msg.activeReplicas));
     log(" Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
   }
 
   public void onFlushMessage(FlushMsg msg) {
+    log("Received flush message from replica " + getSender().path().name(), LogLevel.INFO);
+
     if (isCoordinator()) {
-      Set<ActorRef> flushedReplicas = this.proposedView.get(this.epochSeqNumPair);
+      Set<ActorRef> flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
       flushedReplicas.add(getSender());
-      if (flushedReplicas.size() >= proposedView.size()) {
-        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch++, 0), proposedView.get(epochSeqNumPair), coordinator));
+      Set<ActorRef> participants = proposedView.get(epochSeqNumPair.currentEpoch);
+      if (flushedReplicas.size() >= participants.size()) {
+        log("Proposed view: " + participants.toString(), LogLevel.INFO);
+        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch++, 0), participants, coordinator));
         currentRequest = 0;
         log("View change message sent", LogLevel.INFO);
       }
@@ -404,10 +436,8 @@ public class Replica extends Node {
     getContext().become(createReceive());
     
     if (isCoordinator()) {
-      updateQuorum();
       supervisor.tell(new Client.SetCoordinator(), getSelf());
     }
-    
   }
   
   public void onSyncMessageReceipt(SyncMessage sm){
@@ -418,7 +448,6 @@ public class Replica extends Node {
     for(WriteDataMsg msg : pendingMsg){
       coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
     }
-    coordinator.tell(new FlushMsg(), getSelf());
   }
 
   // on election message receipt, check if up to date
@@ -427,19 +456,25 @@ public class Replica extends Node {
     // send ack to whoever sent the message
     if (hasReceivedElectionMessage && !hasBeenUpdated(electionMessage)){
       // END ELECTION
-      this.coordinator = proposedCoord;
+      updateCoordinator(proposedCoord);
       cleanUp();
+      electionTimeout.cancel();
       if (isCoordinator()){
+        log("Coordinator in the new view: " + coordinator.path().name(), LogLevel.DEBUG);
         deferringMessages = false;
+        Set<ActorRef> activeReplicas = electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch);
+        updateQuorum(activeReplicas.size());
+        this.proposedView.put(epochSeqNumPair.currentEpoch, activeReplicas);
+        flushes.put(epochSeqNumPair.currentEpoch, new HashSet<>());
         multicast(new SyncMessage(updateHistory));
         multicast(new Heartbeat());
-        this.proposedView.put(epochSeqNumPair,electionMessage.flushes.get(epochSeqNumPair.currentEpoch));
       }else{
         // set timeout in case new coordinator also crashed
         heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
       }
     } else {
-      // Someone else has discovered a crashed coordinator no need to trigger another election
+
+      // Someone else has discovered a crashed coordinator, no need to trigger another election
       heartbeatTimeout.cancel();
       deferringMessages = true;
       hasReceivedElectionMessage = true;
@@ -448,7 +483,7 @@ public class Replica extends Node {
       
       getSender().tell(new ElectionAck(), getSelf());
       
-      electionMessage.flushes.get(epochSeqNumPair.currentEpoch).add(getSelf());
+      electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch).add(getSelf());
 
       // view update content
       proposedCoord = electionMessage.proposedCoordinator;
@@ -473,6 +508,7 @@ public class Replica extends Node {
           this.updateHistory.put(key, value);
           pos++;
         }
+
         // update self, not the message.
         updateCoordinator(electionMessage.proposedCoordinator);
       } else if (epochSeqNumList.get(0).getCurrentEpoch() < this.epochSeqNumPair.getCurrentEpoch()) {
@@ -487,16 +523,20 @@ public class Replica extends Node {
       }
 
       log(" Received election message from " +getSender() + ". Proposed coordinator: " + proposedCoordinatorID, LogLevel.INFO);
-      sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.flushes), nextHop);
-      electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, electionMessage.flushes));
+      sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.activeReplicas), nextHop);
+      electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, electionMessage.activeReplicas));
     }
   }
   
   // SOLVE PENDING MESSAGES FROM THE REPLICA BEFORE CHANGING VIEW
   public void onPendingWriteMessage(PendingWriteMsg msg) {
     if (isCoordinator()) {
-      requestUpdate(msg.value, msg.sender);
+      requestUpdate(msg.value, getSender());
     }
+  }
+
+  public void onFlushComplete(FlushCompleteMsg msg) {
+    coordinator.tell(new FlushMsg(), getSelf());
   }
 
   private void updateCoordinator(ActorRef coordinator){
