@@ -73,7 +73,7 @@ public abstract class Node extends AbstractActor {
   final static int MAX_DELAY = 500; // max network delay, ms
   final static int READ_TIMEOUT = 500; // timeout to respond to a client, ms
   final static int DECISION_TIMEOUT = 5000; // timeout for the decision, ms
-  final static int ELECTION_TIMEOUT = 5000; // timeout for the decision, ms
+  final static int ELECTION_TIMEOUT = 10000; // timeout for the election, ms
 
   protected Logger logger; 
 
@@ -212,7 +212,7 @@ public abstract class Node extends AbstractActor {
   }
 
   public static class RestartElection implements Serializable {}
-  
+
   public static class WriteDataMsg implements Serializable {
     public final Integer value;
     public final boolean shouldCrash;

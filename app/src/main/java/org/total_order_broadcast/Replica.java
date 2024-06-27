@@ -89,14 +89,6 @@ public class Replica extends Node {
     return Props.create(Replica.class, () -> new Replica(id));
   }
 
-  public ActorRef getCoordinator() {
-    return coordinator;
-  }
-
-  public List<ActorRef> getCurrentView() {
-    return new LinkedList<>(currentView);
-  }
-
   public void onCrash(CrashMsg msg){
     crash();
   }
@@ -167,7 +159,12 @@ public class Replica extends Node {
     }
   }
   
-  public void onTimeout(UpdateTimeOut msg) {
+
+  /**
+   ************************************* COMMUNICATION HANDLING *************************************
+   */
+  
+   public void onTimeout(UpdateTimeOut msg) {
     // If the coordinator does not respond, the replica starts an election
     log("Timeout for update request: " + msg.epochSeqNum, LogLevel.INFO);
     onHeartbeatTimeout(new HeartbeatTimeout());
@@ -175,11 +172,34 @@ public class Replica extends Node {
   
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
     msg.sender.tell(new DataMsg(getValue()), getSelf());
-    log("Read read from Client: " + getSender().path().name() + " Value returned: " + currentValue, LogLevel.INFO);
+    log("Read from Client: " + getSender().path().name() + " Value returned: " + currentValue, LogLevel.INFO);
   }
 
-  /*
-  ************************************* UPDATES HANDLING *************************************
+  public void onHeartbeat(Heartbeat msg) {
+    if (isCoordinator()) {
+      multicastExcept(new Heartbeat(), getSelf());
+      heartbeat = setTimeout(HEARTBEAT_INTERVAL, new Heartbeat());
+    } else {
+      renewHeartbeatTimeout();
+    }
+  }
+
+  public void onPing(ICMPRequest msg) {
+    log("Received ping from " + getSender().path().name(), LogLevel.DEBUG);
+    getSender().tell(new ICMPResponse(), getSelf());
+  }
+
+  private void renewHeartbeatTimeout(){
+    if(heartbeatTimeout != null) {
+      heartbeatTimeout.cancel();
+    }
+    if(!isCoordinator()){
+      heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
+    }
+  }
+
+  /**
+   ************************************* UPDATES HANDLING *************************************
    */
 
   /* Value update from Client */
@@ -324,24 +344,10 @@ public class Replica extends Node {
     } 
   }
 
-  public void onHeartbeat(Heartbeat msg) {
-    if (isCoordinator()) {
-      multicastExcept(new Heartbeat(), getSelf());
-      heartbeat = setTimeout(HEARTBEAT_INTERVAL, new Heartbeat());
-    } else {
-      renewHeartbeatTimeout();
-    }
-  }
-
   private boolean isAckExpected(EpochSeqNum epochSeqNum) {
     return requestHasQuorum.get(epochSeqNum);
   }
   
-  public void onPing(ICMPRequest msg) {
-    log("Received ping from " + getSender().path().name(), LogLevel.DEBUG);
-    getSender().tell(new ICMPResponse(), getSelf());
-  }
-
   // USED BY THE COORD TO MULTICAST THE UPDATE REQUEST
   private void requestUpdate(Integer value, ActorRef sender) {
     currentRequest++;
@@ -358,17 +364,10 @@ public class Replica extends Node {
     pendingRequests.put(esn, sender);
   }
   
-  private void renewHeartbeatTimeout(){
-    if(heartbeatTimeout != null) {
-      heartbeatTimeout.cancel();
-    }
-    if(!isCoordinator()){
-      heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
-    }
-  }
 
-  /*
-  ****************************** ELECTION METHODS AND CLASSES ********************************
+
+  /**
+   ****************************** ELECTION METHODS AND CLASSES ********************************
    */
 
   // COORDINATOR CRASHED, THIS NODE IS THE ONE WHICH DETECTED THE CRASH, THUS THE INITIATOR OF THE ELECTION ALGO
@@ -381,73 +380,6 @@ public class Replica extends Node {
     startElection();
   }
 
-  public void onElectionAck(ElectionAck ack) {
-    voteTimeout.cancel();
-    // eventually this will be set to false (assumption that there is always at least a quorum
-    nextHopTimedOut = false;
-  }
-
-  // if nextHop has crashed, we try with the node after that, until someone sends back an Ack
-  public void onElectionTimeout(ElectionTimeout msg) {
-    nextHopTimedOut = true;
-    // because nextHop timedout we try with the one after that: nextHop+1;
-    nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.activeReplicas),msg.next);
-    // set timeout with nextHop+1
-    voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, msg.activeReplicas));
-    log(" Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
-  }
-
-  public void onFlushMessage(FlushMsg msg) {
-    log("Received flush message from replica " + getSender().path().name(), LogLevel.INFO);
-
-    if (isCoordinator()) {
-      Set<ActorRef> flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
-      flushedReplicas.add(getSender());
-      Set<ActorRef> participants = proposedView.get(epochSeqNumPair.currentEpoch);
-      if (flushedReplicas.size() >= participants.size()) {
-        log("Proposed view: " + participants.toString(), LogLevel.INFO);
-        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0), participants, coordinator));
-        currentRequest = 0;
-        log("View change message sent", LogLevel.INFO);
-      }
-    }
-  }
-
-  public void onViewChange(ViewChangeMsg msg) {
-    currentView.clear();
-    epochSeqNumPair = msg.esn;
-
-    for(ActorRef participant : msg.proposedView){
-      currentView.add(participant);
-      log("New participant added: " + participant.path().name(), LogLevel.INFO);
-    }
-
-
-    log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
-    log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
-    getContext().become(createReceive());
-    
-    if (isCoordinator()) {
-      supervisor.tell(new Client.SetCoordinator(), getSelf());
-    }
-  }
-  
-  public void onSyncMessageReceipt(SyncMessage sm){
-    this.updateHistory = new HashMap<>(sm.updateHistory);
-    deferringMessages = false;
-    
-    if(electionTimeout != null){
-      electionTimeout.cancel();
-      setElectionTimeout = false;
-    }
-    
-    // Retry pending messages from current epoch
-    for(WriteDataMsg msg : pendingMsg){
-      coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
-    }
-  }
-
-  // on election message receipt, check if up to date
   public void onElectionMessageReceipt(ElectionMessage electionMessage){
 
     // send ack to whoever sent the message
@@ -519,12 +451,74 @@ public class Replica extends Node {
         proposedCoord = proposedCoordinatorID == this.id ? getSelf() : proposedCoord;
       }
 
-      log(" Received election message from " +getSender() + ". Proposed coordinator: " + proposedCoordinatorID, LogLevel.INFO);
+      log("Received election message from " + getSender().path().name() + ". Proposed coordinator: " + proposedCoordinatorID, LogLevel.INFO);
       sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.activeReplicas), nextHop);
+
+      if(voteTimeout != null){
+        voteTimeout.cancel();
+      }
+
       voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, electionMessage.activeReplicas));
     }
   }
   
+  public void onSyncMessageReceipt(SyncMessage sm){
+    this.updateHistory = new HashMap<>(sm.updateHistory);
+    deferringMessages = false;
+    
+    if(electionTimeout != null){
+      log("Cancelling election timeout", LogLevel.INFO);
+      electionTimeout.cancel();
+      setElectionTimeout = false;
+    }
+    
+    // Retry pending messages from current epoch
+    for(WriteDataMsg msg : pendingMsg){
+      coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
+    }
+  }
+
+  public void onFlushMessage(FlushMsg msg) {
+    log("Received flush message from replica " + getSender().path().name(), LogLevel.INFO);
+
+    if (isCoordinator()) {
+      Set<ActorRef> flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
+      flushedReplicas.add(getSender());
+      Set<ActorRef> participants = proposedView.get(epochSeqNumPair.currentEpoch);
+      if (flushedReplicas.size() >= participants.size()) {
+        log("Proposed view: " + participants.toString(), LogLevel.INFO);
+        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0), participants, coordinator));
+        currentRequest = 0;
+        log("View change message sent", LogLevel.INFO);
+      }
+    }
+  }
+
+  public void onViewChange(ViewChangeMsg msg) {
+    currentView.clear();
+    epochSeqNumPair = msg.esn;
+
+    for(ActorRef participant : msg.proposedView){
+      currentView.add(participant);
+      log("New participant added: " + participant.path().name(), LogLevel.INFO);
+    }
+
+
+    log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
+    log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
+    getContext().become(createReceive());
+    
+    if (isCoordinator()) {
+      supervisor.tell(new Client.SetCoordinator(), getSelf());
+    }
+  }
+  
+  public void onElectionAck(ElectionAck ack) {
+    voteTimeout.cancel();
+    // eventually this will be set to false (assumption that there is always at least a quorum
+    nextHopTimedOut = false;
+  }
+
   // SOLVE PENDING MESSAGES FROM THE REPLICA BEFORE CHANGING VIEW
   public void onPendingWriteMessage(PendingWriteMsg msg) {
     if (isCoordinator()) {
@@ -536,8 +530,19 @@ public class Replica extends Node {
     coordinator.tell(new FlushMsg(), getSelf());
   }
 
+  // if nextHop has crashed, we try with the node after that, until someone sends back an Ack
+  public void onElectionTimeout(ElectionTimeout msg) {
+    nextHopTimedOut = true;
+    // because nextHop timedout we try with the one after that: nextHop+1;
+    nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.activeReplicas),msg.next);
+    // set timeout with nextHop+1
+    voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, msg.activeReplicas));
+    log(" Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
+  } 
+  
   public void onRestartElection(RestartElection msg) {
     log("Restarting election", LogLevel.INFO);
+    setElectionTimeout = false;
     startElection();
   }
 
@@ -555,17 +560,10 @@ public class Replica extends Node {
     voteTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop, replicasInEpoch));
 
     if(!setElectionTimeout){
-      electionTimeout = setTimeout(ELECTION_TIMEOUT, new HeartbeatTimeout());
+      log("Setting election timeout", LogLevel.INFO);
+      electionTimeout = setTimeout(ELECTION_TIMEOUT, new RestartElection());
       setElectionTimeout = true;
     }
-  }
-
-  private void updateCoordinator(ActorRef coordinator){
-    this.coordinator = coordinator;
-  }
-
-  private boolean hasBeenUpdated(ElectionMessage msg){
-    return !msg.updateHistory.equals(this.updateHistory) || msg.proposedCoordinatorID != this.proposedCoordinatorID;
   }
 
   /**
@@ -585,6 +583,14 @@ public class Replica extends Node {
       participants.get((next) % participants.size()).tell(electionMessage, getSelf());
       return next % participants.size();
     }
+  }
+
+  private void updateCoordinator(ActorRef coordinator){
+    this.coordinator = coordinator;
+  }
+
+  private boolean hasBeenUpdated(ElectionMessage msg){
+    return !msg.updateHistory.equals(this.updateHistory) || msg.proposedCoordinatorID != this.proposedCoordinatorID;
   }
 
   public void onReadHistory(ReadHistory msg) {
