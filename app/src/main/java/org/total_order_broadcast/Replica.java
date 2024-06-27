@@ -543,6 +543,7 @@ public class Replica extends Node {
   public void onRestartElection(RestartElection msg) {
     log("Restarting election", LogLevel.INFO);
     setElectionTimeout = false;
+    nextHop = -1;
     startElection();
   }
 
@@ -553,7 +554,6 @@ public class Replica extends Node {
     Set<ActorRef> activeReplicas = new HashSet<>();
     activeReplicas.add(getSelf());
     replicasInEpoch.put(epochSeqNumPair.currentEpoch, activeReplicas);
-
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory, getSelf(), this.id, replicasInEpoch), nextHop);
     // because of the assumption that there will ALWAYS be a quorum we can safely say that
     // next hop will NEVER be this node
