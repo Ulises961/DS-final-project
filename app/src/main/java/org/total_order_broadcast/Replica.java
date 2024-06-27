@@ -64,6 +64,8 @@ public class Replica extends Node {
   //Flushes for each epoch
   protected final Map<Integer, Set<ActorRef>> flushes;
 
+  private boolean setElectionTimeout;
+
   public Replica(int id) {
     super(id);
     receivedAcks = new HashMap<>();
@@ -137,6 +139,7 @@ public class Replica extends Node {
       
   public Receive electionMode() {
     return receiveBuilder()
+      .match(RestartElection.class, this::onRestartElection)
       .match(ElectionTimeout.class, this::onElectionTimeout)
       .match(ElectionAck.class, this::onElectionAck)
       .match(ElectionMessage.class, this::onElectionMessageReceipt)
@@ -375,21 +378,11 @@ public class Replica extends Node {
     getContext().become(electionMode());
     deferringMessages = true;
 
-    // active replicas are added to the flushes during the election, 
-    //these will become the participants in the new epoch
-    Map<Integer, Set<ActorRef>> replicasInEpoch = new HashMap<>();
-    Set<ActorRef> activeReplicas = new HashSet<>();
-    activeReplicas.add(getSelf());
-    replicasInEpoch.put(epochSeqNumPair.currentEpoch, activeReplicas);
-
-    nextHop = sendElectionMsg(new ElectionMessage(updateHistory, getSelf(), this.id, replicasInEpoch), nextHop);
-    // because of the assumption that there will ALWAYS be a quorum we can safely say that
-    // next hop will NEVER be this node
-    electionTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop, replicasInEpoch));
+    startElection();
   }
 
   public void onElectionAck(ElectionAck ack) {
-    electionTimeout.cancel();
+    voteTimeout.cancel();
     // eventually this will be set to false (assumption that there is always at least a quorum
     nextHopTimedOut = false;
   }
@@ -400,7 +393,7 @@ public class Replica extends Node {
     // because nextHop timedout we try with the one after that: nextHop+1;
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.activeReplicas),msg.next);
     // set timeout with nextHop+1
-    electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, msg.activeReplicas));
+    voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, msg.activeReplicas));
     log(" Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
   }
 
@@ -442,7 +435,12 @@ public class Replica extends Node {
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
     deferringMessages = false;
-
+    
+    if(electionTimeout != null){
+      electionTimeout.cancel();
+      setElectionTimeout = false;
+    }
+    
     // Retry pending messages from current epoch
     for(WriteDataMsg msg : pendingMsg){
       coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
@@ -457,7 +455,7 @@ public class Replica extends Node {
       // END ELECTION
       updateCoordinator(proposedCoord);
       cleanUp();
-      electionTimeout.cancel();
+      voteTimeout.cancel();
       if (isCoordinator()){
         log("Coordinator in the new view: " + coordinator.path().name(), LogLevel.DEBUG);
         deferringMessages = false;
@@ -523,7 +521,7 @@ public class Replica extends Node {
 
       log(" Received election message from " +getSender() + ". Proposed coordinator: " + proposedCoordinatorID, LogLevel.INFO);
       sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.activeReplicas), nextHop);
-      electionTimeout = setTimeout(ELECTION_TIMEOUT_DURATION, new ElectionTimeout(nextHop, electionMessage.activeReplicas));
+      voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, electionMessage.activeReplicas));
     }
   }
   
@@ -536,6 +534,30 @@ public class Replica extends Node {
 
   public void onFlushComplete(FlushCompleteMsg msg) {
     coordinator.tell(new FlushMsg(), getSelf());
+  }
+
+  public void onRestartElection(RestartElection msg) {
+    log("Restarting election", LogLevel.INFO);
+    startElection();
+  }
+
+  private void startElection() {
+     // active replicas are added to the flushes during the election, 
+    //these will become the participants in the new epoch
+    Map<Integer, Set<ActorRef>> replicasInEpoch = new HashMap<>();
+    Set<ActorRef> activeReplicas = new HashSet<>();
+    activeReplicas.add(getSelf());
+    replicasInEpoch.put(epochSeqNumPair.currentEpoch, activeReplicas);
+
+    nextHop = sendElectionMsg(new ElectionMessage(updateHistory, getSelf(), this.id, replicasInEpoch), nextHop);
+    // because of the assumption that there will ALWAYS be a quorum we can safely say that
+    // next hop will NEVER be this node
+    voteTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop, replicasInEpoch));
+
+    if(!setElectionTimeout){
+      electionTimeout = setTimeout(ELECTION_TIMEOUT, new HeartbeatTimeout());
+      setElectionTimeout = true;
+    }
   }
 
   private void updateCoordinator(ActorRef coordinator){

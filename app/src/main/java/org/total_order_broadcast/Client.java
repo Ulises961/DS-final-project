@@ -111,7 +111,7 @@ public class Client extends Node {
     public void onRequestRead(RequestRead msg){
         if(server != null){
             server.tell(new ReadDataMsg(getSelf()),getSelf());
-            readTimeout = setTimeout(VOTE_TIMEOUT, new Timeout());
+            readTimeout = setTimeout(READ_TIMEOUT, new Timeout());
         } 
     }
 

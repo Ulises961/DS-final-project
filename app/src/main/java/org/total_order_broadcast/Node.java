@@ -56,6 +56,8 @@ public abstract class Node extends AbstractActor {
   // next heartbeat
   protected Cancellable heartbeat;
 
+  protected Cancellable voteTimeout;
+
   protected Cancellable electionTimeout;
 
   // to include delays in the messages
@@ -66,10 +68,12 @@ public abstract class Node extends AbstractActor {
   // Hearbeat
   protected final int HEARTBEAT_TIMEOUT_DURATION = 6000;
   protected final int HEARTBEAT_INTERVAL = 2000;
-  protected final int ELECTION_TIMEOUT_DURATION = 5000;
+  protected final int VOTE_TIMEOUT = 1000;
   final static int N_PARTICIPANTS = 2;
-  final static int VOTE_TIMEOUT = 500; // timeout for the votes, ms
+  final static int MAX_DELAY = 500; // max network delay, ms
+  final static int READ_TIMEOUT = 500; // timeout to respond to a client, ms
   final static int DECISION_TIMEOUT = 5000; // timeout for the decision, ms
+  final static int ELECTION_TIMEOUT = 5000; // timeout for the decision, ms
 
   protected Logger logger; 
 
@@ -207,6 +211,8 @@ public abstract class Node extends AbstractActor {
     }
   }
 
+  public static class RestartElection implements Serializable {}
+  
   public static class WriteDataMsg implements Serializable {
     public final Integer value;
     public final boolean shouldCrash;
@@ -272,7 +278,7 @@ public abstract class Node extends AbstractActor {
   }
 
   public static class ReadHistory implements Serializable {}
-  
+
   public void setValue(int value) {
     this.currentValue = value;
   }
@@ -306,7 +312,7 @@ public abstract class Node extends AbstractActor {
   }
 
   // emulate a delay of d milliseconds
-  public void delay(int d) {
+  public static void delay(int d) {
     try {
       Thread.sleep(d);
     } catch (Exception ignored) {
@@ -385,7 +391,7 @@ public abstract class Node extends AbstractActor {
     }
 
     private int randomDelay() {
-        int upperbound = Math.round((VOTE_TIMEOUT + 50) / N_PARTICIPANTS); // random delay
+        int upperbound = Math.round((MAX_DELAY + 50) / N_PARTICIPANTS); // random delay
         return rnd.nextInt(upperbound);
     }
 }

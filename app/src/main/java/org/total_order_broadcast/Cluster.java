@@ -166,6 +166,7 @@ public class Cluster {
             for(ActorRef c : clients){
               c.tell(new WriteDataMsg(updateValue++, c), c);
             }
+            Node.delay(200);
             supervisor.tell(new CrashCoord(), supervisor);
             break;
           case 8:
