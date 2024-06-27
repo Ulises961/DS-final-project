@@ -68,12 +68,12 @@ public abstract class Node extends AbstractActor {
   // Hearbeat
   protected final int HEARTBEAT_TIMEOUT_DURATION = 6000;
   protected final int HEARTBEAT_INTERVAL = 2000;
-  protected final int VOTE_TIMEOUT = 1000;
-  final static int N_PARTICIPANTS = 2;
+  protected final int VOTE_TIMEOUT = 5000;
+  final static int N_PARTICIPANTS = 3;
   final static int MAX_DELAY = 500; // max network delay, ms
   final static int READ_TIMEOUT = 500; // timeout to respond to a client, ms
   final static int DECISION_TIMEOUT = 5000; // timeout for the decision, ms
-  final static int ELECTION_TIMEOUT = 10000; // timeout for the election, ms
+  final static int ELECTION_TIMEOUT = 50000; // timeout for the election, ms
 
   protected Logger logger; 
 
