@@ -49,16 +49,27 @@ public class Client extends Node {
         }
     }
 
-    public void onStartMessage(JoinGroupMsg msg) {
-        setGroup(msg);
-        assignServer();
-    }
+    public static class RequestRead {}
 
-    public void onSendUpdate(WriteDataMsg update){
-        // First check server is alive, 
-        // on ping response send update, otherwise choose another server and retry
-        updates.add(new UpdateRequest(update.value,update.sender, update.shouldCrash));
-        pingServer();
+      @Override
+    public Receive createReceive() {
+        return receiveBuilder()
+            .match(JoinGroupMsg.class,this::onStartMessage)
+            .match(WriteDataMsg.class,this::onSendUpdate)
+            .match(DataMsg.class, this::onReadResponse)
+            .match(RequestRead.class, this::onRequestRead)
+            .match(ICMPResponse.class, this::onICMPResponse)
+            .match(ICMPTimeout.class, this::ICMPTimeout)
+            .match(Timeout.class, this::onTimeout)
+            .match(Supervise.class, this::onSupervise)
+            .build();
+    }
+   
+    public Receive supervise() {
+        return receiveBuilder()
+            .match(SetCoordinator.class, this::onSetCoordinator)
+            .match(CrashCoord.class, this::onCrashCoord)
+            .build();
     }
 
     @Override
@@ -77,17 +88,16 @@ public class Client extends Node {
         // client doesn't crash
     }
 
-    public static class RequestRead {}
+    public void onStartMessage(JoinGroupMsg msg) {
+        setGroup(msg);
+        assignServer();
+    }
 
-    public void assignServer(){
-        Iterator<ActorRef> iterator = participants.iterator();
-        if (iterator.hasNext()) {
-            int randomIndex = (int) (Math.random() * participants.size());
-            for (int i = 0; i < randomIndex; i++) {
-                iterator.next();
-            }
-            server = iterator.next();
-        }
+    public void onSendUpdate(WriteDataMsg update){
+        // First check server is alive, 
+        // on ping response send update, otherwise choose another server and retry
+        updates.add(new UpdateRequest(update.value, update.sender, update.shouldCrash));
+        pingServer();
     }
 
     public void onTimeout(Timeout msg) {
@@ -95,7 +105,6 @@ public class Client extends Node {
         participants.remove(server);
         assignServer();
         onRequestRead(new RequestRead());
-
     }
 
     public void onRequestRead(RequestRead msg){
@@ -109,7 +118,7 @@ public class Client extends Node {
         readTimeout.cancel();
     }
 
-    public void onPong(ICMPResponse msg){
+    public void onICMPResponse(ICMPResponse msg){
         checkingServer = false;
         serverLivenessTimeout.cancel();
         if(server != null){
@@ -153,25 +162,14 @@ public class Client extends Node {
         }
     }
 
-    @Override
-    public Receive createReceive() {
-        return receiveBuilder()
-            .match(JoinGroupMsg.class,this::onStartMessage)
-            .match(WriteDataMsg.class,this::onSendUpdate)
-            .match(DataMsg.class, this::onReadResponse)
-            .match(RequestRead.class, this::onRequestRead)
-            .match(Timeout.class, this::onTimeout)
-            .match(ICMPResponse.class, this::onPong)
-            .match(ICMPTimeout.class, this::ICMPTimeout)
-            .match(Supervise.class, this::onSupervise)
-            .build();
+    private void assignServer(){
+        Iterator<ActorRef> iterator = participants.iterator();
+        if (iterator.hasNext()) {
+            int randomIndex = (int) (Math.random() * participants.size());
+            for (int i = 0; i < randomIndex; i++) {
+                iterator.next();
+            }
+            server = iterator.next();
+        }
     }
-   
-    public Receive supervise() {
-        return receiveBuilder()
-            .match(SetCoordinator.class, this::onSetCoordinator)
-            .match(CrashCoord.class, this::onCrashCoord)
-            .build();
-    }
-
 }
