@@ -19,6 +19,7 @@ import org.total_order_broadcast.Client.Supervise;
 import org.total_order_broadcast.Node.CrashCoord;
 import org.total_order_broadcast.Node.CrashMsg;
 import org.total_order_broadcast.Node.JoinGroupMsg;
+import org.total_order_broadcast.Node.ReadHistory;
 import org.total_order_broadcast.Node.WriteDataMsg;
 
 public class Cluster {
@@ -104,7 +105,8 @@ public class Cluster {
             "Crash coordinator",
             "Update and crash",
             "Concurrent updates",
-            "Coordinator crash in middle of update"
+            "Coordinator crash in middle of update",
+            "Read history",
           };
 
         input = readInput(in, actions);
@@ -165,6 +167,10 @@ public class Cluster {
               c.tell(new WriteDataMsg(updateValue++, c), c);
             }
             supervisor.tell(new CrashCoord(), supervisor);
+            break;
+          case 8:
+            // Read history
+            supervisor.tell(new ReadHistory(), supervisor);
             break;
           default:
             break;

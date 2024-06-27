@@ -271,6 +271,8 @@ public abstract class Node extends AbstractActor {
     }
   }
 
+  public static class ReadHistory implements Serializable {}
+  
   public void setValue(int value) {
     this.currentValue = value;
   }

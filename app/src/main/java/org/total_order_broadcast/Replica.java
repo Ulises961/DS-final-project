@@ -130,7 +130,8 @@ public class Replica extends Node {
       .match(ICMPRequest.class, this::onPing)
       .match(CrashMsg.class, this::onCrash)
       .match(ElectionMessage.class, this::onElectionMessageReceipt)
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.DEBUG))
+      .match(ReadHistory.class, this::onReadHistory)
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.INFO))
       .build();
   }
       
@@ -149,7 +150,7 @@ public class Replica extends Node {
       .match(FlushCompleteMsg.class, this::onFlushComplete)
       .match(ViewChangeMsg.class, this::onViewChange)
       .match(CrashMsg.class, this::onCrash)
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.DEBUG))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.INFO))
       .build();
   }
   
@@ -412,7 +413,7 @@ public class Replica extends Node {
       Set<ActorRef> participants = proposedView.get(epochSeqNumPair.currentEpoch);
       if (flushedReplicas.size() >= participants.size()) {
         log("Proposed view: " + participants.toString(), LogLevel.INFO);
-        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch++, 0), participants, coordinator));
+        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0), participants, coordinator));
         currentRequest = 0;
         log("View change message sent", LogLevel.INFO);
       }
@@ -425,11 +426,9 @@ public class Replica extends Node {
 
     for(ActorRef participant : msg.proposedView){
       currentView.add(participant);
-      epochSeqNumPair = msg.esn;
       log("New participant added: " + participant.path().name(), LogLevel.INFO);
     }
 
-    coordinator = msg.coordinator;
 
     log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
     log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
@@ -566,6 +565,10 @@ public class Replica extends Node {
     }
   }
 
+  public void onReadHistory(ReadHistory msg) {
+    log("History: " + updateHistory.toString(), LogLevel.INFO);
+  }
+  
   private void cleanUp(){
     this.proposedCoord = null;
     this.proposedCoordinatorID = -1;

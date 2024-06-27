@@ -69,6 +69,7 @@ public class Client extends Node {
         return receiveBuilder()
             .match(SetCoordinator.class, this::onSetCoordinator)
             .match(CrashCoord.class, this::onCrashCoord)
+            .match(ReadHistory.class, this::onReadHistory)
             .build();
     }
 
@@ -151,6 +152,12 @@ public class Client extends Node {
     public void onCrashCoord(CrashCoord msg){
         if(coordinator != null) {
             coordinator.tell(new CrashMsg(),getSelf());
+        }
+    }
+
+    public void onReadHistory(ReadHistory msg){
+        if(coordinator != null) {
+            coordinator.tell(msg,getSelf());
         }
     }
 
