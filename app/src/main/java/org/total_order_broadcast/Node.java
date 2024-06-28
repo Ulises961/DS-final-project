@@ -70,11 +70,11 @@ public abstract class Node extends AbstractActor {
   final static int HEARTBEAT_TIMEOUT_DURATION = 4000;
   final static int HEARTBEAT_INTERVAL = 2000;
   final static int VOTE_TIMEOUT = 5000;
-  final static int N_PARTICIPANTS = 5;
+  final static int N_PARTICIPANTS = 7;
   final static int MAX_DELAY = 500; // max network delay, ms
   final static int READ_TIMEOUT = 500; // timeout to respond to a client, ms
   final static int DECISION_TIMEOUT = 1000; // timeout for the decision, ms
-  final static int ELECTION_TIMEOUT = 8000; // timeout for the election, ms
+  final static int ELECTION_TIMEOUT = 4000; // timeout for the election, ms
 
   protected Logger logger; 
 
@@ -393,7 +393,7 @@ public abstract class Node extends AbstractActor {
       Cluster.logWithMDC(message, contextMap, logger, level);
     }
 
-    private int randomDelay() {
+    protected int randomDelay() {
         int upperbound = Math.round((MAX_DELAY + 50) / N_PARTICIPANTS); // random delay
         return rnd.nextInt(upperbound);
     }

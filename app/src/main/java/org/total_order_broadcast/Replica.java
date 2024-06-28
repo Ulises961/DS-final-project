@@ -420,6 +420,10 @@ public class Replica extends Node {
       if(heartbeatTimeout != null){
         heartbeatTimeout.cancel();
       }
+      // Every replica must have a chance to restart an election
+      if(!setElectionTimeout){
+        createElectionTimeout();
+      }
 
       deferringMessages = true;
       hasReceivedElectionMessage = true;
@@ -539,7 +543,7 @@ public class Replica extends Node {
     }
 
     renewHeartbeatTimeout();
-    
+
     log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
     log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
     getContext().become(createReceive());
@@ -578,18 +582,16 @@ public class Replica extends Node {
     setElectionTimeout = false;
     nextHop = -1;
     multicast(new ElectionRestated());
+    startElection();
   }
 
   public void onElectionRestarted(ElectionRestated msg) {
     log("Election restarted", LogLevel.INFO);
     
     if(electionTimeout != null){
+      log("Cancelling election timeout", LogLevel.INFO);
       electionTimeout.cancel();
     }
-
-    setElectionTimeout = false;
-    nextHop = -1;
-    startElection();
   }
 
   private void startElection() {
@@ -604,11 +606,7 @@ public class Replica extends Node {
     // next hop will NEVER be this node
     voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, replicasInEpoch));
 
-    if(!setElectionTimeout){
-      log("Setting election timeout", LogLevel.INFO);
-      electionTimeout = setTimeout(ELECTION_TIMEOUT, new RestartElection());
-      setElectionTimeout = true;
-    }
+    createElectionTimeout();
   }
 
   /**
@@ -654,6 +652,16 @@ public class Replica extends Node {
       return false;
     }
     return coordinator.equals(getSelf());
+  }
+
+  private void createElectionTimeout(){
+    if(!setElectionTimeout){
+      // Stagger election timeouts pioritizing lower nodes to trigger election first
+      int time = ELECTION_TIMEOUT + (id * 750);
+      log("Setting election timeout to trigger in " + time + "ms", LogLevel.INFO);
+      electionTimeout = setTimeout(time, new RestartElection());
+      setElectionTimeout = true;
+    }
   }
 
 }
