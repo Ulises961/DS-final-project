@@ -17,11 +17,40 @@ import org.slf4j.LoggerFactory;
 import org.total_order_broadcast.Client.*;
 import org.total_order_broadcast.Node.*;
 
-
+/**
+ * The {@code Cluster} class is the main class responsible for setting up and managing
+ * a virtual synchrony cluster of nodes using Akka actors. It initializes the actor system,
+ * creates nodes and clients, and handles user input to perform actions within the cluster.
+ * It also includes logging functionality with MDC (Mapped Diagnostic Context) for enhanced log management.
+ *
+ * <p>Usage:
+ * <pre>
+ *   java org.total_order_broadcast.Cluster
+ * </pre>
+ * </p>
+ *
+ * <p>This class is the entry point for the application and includes the main method
+ * that sets up the environment and starts the interactive user input loop.</p>
+ *
+ * @see akka.actor.ActorSystem
+ * @see akka.actor.ActorRef
+ * @see org.total_order_broadcast.Node
+ * @see org.total_order_broadcast.Client
+ * @see org.slf4j.MDC
+ * @see org.slf4j.Logger
+ * @see org.slf4j.LoggerFactory
+ */
 public class Cluster {
   private static Map<String, String> contextMap =  new HashMap<>();
 
   private static final Logger logger = LoggerFactory.getLogger(Cluster.class);
+
+  /**
+   * The main method that sets up the actor system, creates the nodes and clients,
+   * and starts the interactive user input loop to perform actions within the cluster.
+   *
+   * @param args Command line arguments (not used).
+   */
   public static void main(String[] args) {
 
     Scanner in = new Scanner(System.in);
@@ -214,6 +243,13 @@ public class Cluster {
     }
   }
 
+  /**
+   * Reads input from the user to select an action from a list of actions.
+   *
+   * @param in A {@code Scanner} object to read user input.
+   * @param actions An array of strings representing the available actions.
+   * @return The index of the selected action.
+   */
   private static int readInput(Scanner in, String[] actions) {
     System.out.println("\n#########\n");
     System.out.println("Please select menu item");
@@ -240,6 +276,14 @@ public class Cluster {
     return value;
   }
 
+  /**
+   * Logs a message with the given context map and log level using the provided logger.
+   *
+   * @param message The message to be logged.
+   * @param contextMap A map containing the context information for MDC.
+   * @param logger The logger to be used for logging the message.
+   * @param level The log level at which the message should be logged.
+   */
   public static void logWithMDC(String message, Map<String, String> contextMap, Logger logger, LogLevel level) {
       try {
             // Set MDC logContext
@@ -266,7 +310,9 @@ public class Cluster {
   }
 }
 
-// Define LogLevel as an enum for convenience
+/**
+ * Enum representing the log levels.
+ */
 enum LogLevel {
   INFO, WARN, ERROR, DEBUG
 }

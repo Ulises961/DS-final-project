@@ -95,7 +95,11 @@ public class Replica extends Node {
   public void onCrash(CrashMsg msg){
     crash();
   }
-  // election message, this is what each replica receives/sends
+
+  /**
+   * Represents an election message sent and received by each replica during the election process.
+   * This class contains the proposed coordinator, update history, proposed coordinator ID, and active replicas.
+   */
   public static class ElectionMessage implements Serializable {
     public ActorRef proposedCoordinator;
     Map<EpochSeqNum, Integer> updateHistory;
@@ -103,6 +107,14 @@ public class Replica extends Node {
     // Collected active replicas
     protected final Map<Integer, Set<ActorRef>> activeReplicas;
 
+    /**
+     * Constructs an {@code ElectionMessage} with the specified parameters.
+     *
+     * @param updateHistory the update history as a map of {@code EpochSeqNum} to {@code Integer}.
+     * @param coord the proposed coordinator {@code ActorRef}.
+     * @param proposedCoordinatorID the ID of the proposed coordinator.
+     * @param activeReplicas the map of active replicas collected during the election process.
+     */
     public ElectionMessage(Map<EpochSeqNum, Integer> updateHistory, ActorRef coord, int proposedCoordinatorID, Map<Integer, Set<ActorRef>> activeReplicas) {
       this.updateHistory = updateHistory;
       this.proposedCoordinatorID = proposedCoordinatorID;
@@ -153,7 +165,13 @@ public class Replica extends Node {
       .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.DEBUG))
       .build();
   }
-  
+
+  /**
+   * Handles the start message to join a group.
+   * This method sets the group, assigns the coordinator and supervisor, and sends a heartbeat if the current node is the coordinator.
+   *
+   * @param msg the {@code JoinGroupMsg} received, containing group information, coordinator, and supervisor.
+   */
   public void onStartMessage(JoinGroupMsg msg) {
     setGroup(msg);
     coordinator = msg.coordinator;
@@ -163,23 +181,38 @@ public class Replica extends Node {
       supervisor.tell(new Client.SetCoordinator(), getSelf());
     }
   }
-  
+
 
   /**
-   ************************************* COMMUNICATION HANDLING *************************************
+   * Handles the timeout for an update request.
+   * If the coordinator does not respond, this method starts an election process.
+   *
+   * @param msg the {@code UpdateTimeOut} received, indicating the timeout for an update request.
    */
-  
    public void onTimeout(UpdateTimeOut msg) {
     // If the coordinator does not respond, the replica starts an election
     log("Timeout for update request: " + msg.epochSeqNum, LogLevel.INFO);
     onHeartbeatTimeout(new HeartbeatTimeout());
   }
-  
+
+  /**
+   * Handles a read message from a client.
+   * This method sends the current value back to the client.
+   *
+   * @param msg the {@code ReadDataMsg} received, containing the sender and read request details.
+   */
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
     msg.sender.tell(new DataMsg(getValue()), getSelf());
     log("Read from client: " + getSender().path().name() + ". Value returned: " + currentValue, LogLevel.DEBUG);
   }
 
+  /**
+   * Handles the receipt of a heartbeat message.
+   * If the current node is the coordinator, it multicasts a heartbeat to other nodes.
+   * Otherwise, it renews the heartbeat timeout.
+   *
+   * @param msg the {@code Heartbeat} message received.
+   */
   public void onHeartbeat(Heartbeat msg) {
     if (isCoordinator()) {
       multicastExcept(new Heartbeat(), getSelf());
@@ -189,10 +222,17 @@ public class Replica extends Node {
     }
   }
 
+  /**
+   * Handles the receipt of a ping message.
+   * This method logs the receipt of the ping and sends a response back to the sender.
+   *
+   * @param msg the {@code ICMPRequest} message received, indicating a ping request.
+   */
   public void onPing(ICMPRequest msg) {
     log("Received ping from " + getSender().path().name(), LogLevel.DEBUG);
     getSender().tell(new ICMPResponse(), getSelf());
   }
+
 
   private void renewHeartbeatTimeout(){
     if(heartbeatTimeout != null) {
@@ -389,6 +429,14 @@ public class Replica extends Node {
     startElection();
   }
 
+  /**
+   * Handles the receipt of an election message within the cluster.
+   * This method processes the election message to update the coordinator,
+   * manage the election state, and ensure the cluster remains synchronized.
+   *
+   * @param electionMessage the {@code ElectionMessage} received, containing information
+   *                        about the proposed coordinator, active replicas, and update history.
+   */
   public void onElectionMessageReceipt(ElectionMessage electionMessage){
 
     log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " + getSender().path().name(), LogLevel.INFO);
@@ -487,7 +535,13 @@ public class Replica extends Node {
       voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, electionMessage.activeReplicas));
     }
   }
-  
+
+  /**
+   * Handles the receipt of a sync message within the cluster.
+   * This method updates the node's history, cancels timeouts, and processes any pending messages.
+   *
+   * @param sm the {@code SyncMessage} received, containing the update history.
+   */
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
     deferringMessages = false;
@@ -518,6 +572,12 @@ public class Replica extends Node {
   
   }
 
+  /**
+   * Handles the receipt of a flush message from a replica.
+   * This method updates the state of flushed replicas and can propose a new view if conditions are met.
+   *
+   * @param msg the {@code FlushMsg} received from a replica.
+   */
   public void onFlushMessage(FlushMsg msg) {
     log("Received flush message from replica " + getSender().path().name(), LogLevel.INFO);
 
@@ -534,6 +594,12 @@ public class Replica extends Node {
     }
   }
 
+  /**
+   * Handles the receipt of a view change message within the cluster.
+   * This method updates the current view and coordinator based on the new view proposed.
+   *
+   * @param msg the {@code ViewChangeMsg} received, containing the new epoch sequence number and proposed view.
+   */
   public void onViewChange(ViewChangeMsg msg) {
     currentView.clear();
     epochSeqNumPair = msg.esn;
@@ -552,14 +618,25 @@ public class Replica extends Node {
       supervisor.tell(new Client.SetCoordinator(), getSelf());
     }
   }
-  
+
+  /**
+   * Handles the receipt of an election acknowledgment message.
+   * This method cancels the vote timeout and updates the state to indicate that the next hop has not timed out.
+   *
+   * @param ack the {@code ElectionAck} received, indicating acknowledgment of the election message.
+   */
   public void onElectionAck(ElectionAck ack) {
     voteTimeout.cancel();
     // eventually this will be set to false (assumption that there is always at least a quorum
     nextHopTimedOut = false;
   }
 
-  // SOLVE PENDING MESSAGES FROM THE REPLICA BEFORE CHANGING VIEW
+  /**
+   * Handles the receipt of a pending write message.
+   * If the current node is the coordinator, it requests an update for the pending write message.
+   *
+   * @param msg the {@code PendingWriteMsg} received, containing the value to be updated.
+   */
   public void onPendingWriteMessage(PendingWriteMsg msg) {
     if (isCoordinator()) {
       requestUpdate(msg.value, getSender());
@@ -567,7 +644,12 @@ public class Replica extends Node {
   }
 
 
-  // if nextHop has crashed, we try with the node after that, until someone sends back an Ack
+  /**
+   * Handles the election timeout message.
+   * If the next hop has timed out, this method tries with the subsequent node.
+   *
+   * @param msg the {@code ElectionTimeout} received, containing the next hop and active replicas.
+   */
   public void onElectionTimeout(ElectionTimeout msg) {
     nextHopTimedOut = true;
     // because nextHop timedout we try with the one after that: nextHop+1;
@@ -575,8 +657,14 @@ public class Replica extends Node {
     // set timeout with nextHop+1
     voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, msg.activeReplicas));
     log("Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
-  } 
-  
+  }
+
+  /**
+   * Handles the restart election message.
+   * This method initiates the process to restart the election.
+   *
+   * @param msg the {@code RestartElection} received, indicating the need to restart the election.
+   */
   public void onRestartElection(RestartElection msg) {
     log("Restarting election", LogLevel.INFO);
     setElectionTimeout = false;
@@ -585,6 +673,12 @@ public class Replica extends Node {
     startElection();
   }
 
+  /**
+   * Handles the election restarted message.
+   * This method updates the state to reflect the restarted election and initiates the election process again.
+   *
+   * @param msg the {@code ElectionRestated} received, indicating the election has been restarted.
+   */
   public void onElectionRestarted(ElectionRestated msg) {
     log("Election restarted", LogLevel.INFO);
     
@@ -594,6 +688,10 @@ public class Replica extends Node {
     }
   }
 
+  /**
+   * Starts the election process.
+   * This method initiates an election by sending an election message to the next hop and setting the necessary timeouts.
+   */
   private void startElection() {
      // active replicas are added to the flushes during the election, 
     //these will become the participants in the new epoch
@@ -610,7 +708,13 @@ public class Replica extends Node {
   }
 
   /**
-   *  Logic: sort list of participants, get replica whose id > this.id, then try to send, if timeout update nextHop
+   * Sends an election message to the appropriate replica.
+   * This method sorts the list of participants, finds the next replica whose ID is greater than the current node's ID,
+   * and attempts to send the election message. If a timeout occurs, it updates the next hop.
+   *
+   * @param electionMessage the {@code ElectionMessage} to be sent.
+   * @param next the index of the next hop in the list of participants.
+   * @return the index of the next hop after sending the election message.
    */
   private int sendElectionMsg(ElectionMessage electionMessage, int next){
     List<ActorRef> participants = new LinkedList<ActorRef>(currentView);
@@ -629,23 +733,49 @@ public class Replica extends Node {
     }
   }
 
+  /**
+   * Updates the coordinator to the specified actor.
+   *
+   * @param coordinator the new coordinator {@code ActorRef}.
+   */
   private void updateCoordinator(ActorRef coordinator){
     this.coordinator = coordinator;
   }
 
+  /**
+   * Checks if the received election message has been updated compared to the current state.
+   *
+   * @param msg the {@code ElectionMessage} to be checked.
+   * @return {@code true} if the message has been updated, {@code false} otherwise.
+   */
   private boolean hasBeenUpdated(ElectionMessage msg){
     return !msg.updateHistory.equals(this.updateHistory) || msg.proposedCoordinatorID != this.proposedCoordinatorID;
   }
 
+  /**
+   * Handles the receipt of a read history message.
+   * This method logs the current update history.
+   *
+   * @param msg the {@code ReadHistory} message received.
+   */
   public void onReadHistory(ReadHistory msg) {
     log("History: " + updateHistory.toString(), LogLevel.INFO);
   }
-  
+
+  /**
+   * Cleans up the state related to the election process.
+   * This method resets the proposed coordinator and coordinator ID.
+   */
   private void cleanUp(){
     this.proposedCoord = null;
     this.proposedCoordinatorID = -1;
   }
 
+  /**
+   * Checks if the current node is the coordinator.
+   *
+   * @return {@code true} if the current node is the coordinator, {@code false} otherwise.
+   */
   private boolean isCoordinator() {
     if (this.coordinator == null) {
       logger.error("Coordinator is not set");
@@ -654,6 +784,11 @@ public class Replica extends Node {
     return coordinator.equals(getSelf());
   }
 
+  /**
+   * Creates an election timeout.
+   * This method sets an election timeout, prioritizing lower node IDs to trigger the election first.
+   * The timeout is staggered based on the node's ID to ensure orderly election initiation.
+   */
   private void createElectionTimeout(){
     if(!setElectionTimeout){
       // Stagger election timeouts pioritizing lower nodes to trigger election first
