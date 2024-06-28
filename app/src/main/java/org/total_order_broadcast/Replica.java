@@ -233,7 +233,9 @@ public class Replica extends Node {
     getSender().tell(new ICMPResponse(), getSelf());
   }
 
-
+  /**
+   * Cancels the current heartbeat timeout and schedules a new one if not the coordinator.
+   */
   private void renewHeartbeatTimeout(){
     if(heartbeatTimeout != null) {
       heartbeatTimeout.cancel();
@@ -244,10 +246,12 @@ public class Replica extends Node {
   }
 
   /**
-   ************************************* UPDATES HANDLING *************************************
+   * Handles the WriteDataMsg message received from clients or replicas, processing write requests or updates.
+   * Depending on the system state, it either processes the write request locally if the node is the coordinator,
+   * forwards the update message to the coordinator if not, or defers messages during an election.
+   *
+   * @param msg The WriteDataMsg message containing the write/update details, including value and sender information.
    */
-
-  /* Value update from Client */
   public void onUpdateMessage(WriteDataMsg msg) {
     // Defer messages during election. New messages make part of the next epoch
     if(deferringMessages) {
@@ -290,7 +294,13 @@ public class Replica extends Node {
     }
   }
 
-  // CO-HORTS RECEIVE THIS AND SEND ACKS BACK TO THE COORDINATOR
+  /**
+   * Handles the UpdateRequest message received from the coordinator, initiating an update process.
+   * Sends an acknowledgement (UpdateAck) to the coordinator, sets a timeout for receiving a WriteOk,
+   * and renews the heartbeat timeout assumption.
+   *
+   * @param msg The UpdateRequest message containing the update details, including value and epoch sequence number.
+   */
   public void onUpdateRequest(UpdateRequest msg) {
     // Updates must be monotonically increasing within the latest epoch
     log("Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum, LogLevel.INFO);
@@ -307,7 +317,14 @@ public class Replica extends Node {
     renewHeartbeatTimeout();
   }
 
-  // COORDINATOR RECEIVES ACKS AND SENDS WRITEOK
+  /**
+   * Handles the UpdateAck message received from replicas confirming receipt of an update request.
+   * Processes acknowledgements to determine when a quorum is reached and sends a WriteOk message
+   * to signify completion of the update phase for the corresponding epoch sequence number.
+   *
+   * @param ack The UpdateAck message containing the acknowledgement details, including the value,
+   *            epoch sequence number, and sender information.
+   */
   public void onUpdateAck(UpdateAck ack) {
     log("Is Ack" + ack.epochSeqNum + " expected: " + isAckExpected(ack.epochSeqNum), LogLevel.INFO);
     if (isAckExpected(ack.epochSeqNum)) {
@@ -323,7 +340,20 @@ public class Replica extends Node {
     }
   }
 
-  // ALL'S WELL THAT ENDS WELL: COMMIT UPDATE
+  /**
+   * Handles the WriteOk message received from the coordinator or another node.
+   * This method processes commit decisions based on the sequence numbers and manages pending messages.
+   * If the received message's sequence number indicates it's the next expected in sequence, it commits
+   * the associated value and updates internal state accordingly. If the sequence number is higher than
+   * the current expected sequence number, it defers committing until the correct sequence is reached.
+   * Pending messages associated with the same value are removed once committed.
+   * This method also handles scenarios where the actor itself proposed the write operation. It removes
+   * corresponding pending messages and updates internal state. If all pending messages are committed,
+   * it notifies the coordinator to change the view.
+   *
+   * @param msg The WriteOk message containing the commit information, including the value, epoch sequence number,
+   *            and proposer details.
+   */
   public void onWriteOk(WriteOk msg) {
     
     // Cancel the timeout for the update request
@@ -393,11 +423,26 @@ public class Replica extends Node {
     } 
   }
 
+  /**
+   * Checks if an acknowledgement (Ack) is expected for a given epoch sequence number.
+   * This method determines whether the system is still waiting for acknowledgements
+   * to achieve a quorum for the specified epoch sequence number.
+   *
+   * @param epochSeqNum The epoch sequence number for which to check the acknowledgement status.
+   * @return {@code true} if an Ack is expected (i.e., quorum has not been achieved);
+   *         {@code false} if an Ack is not expected (i.e., quorum has been achieved).
+   */
   private boolean isAckExpected(EpochSeqNum epochSeqNum) {
     return !requestHasQuorum.get(epochSeqNum);
   }
-  
-  // USED BY THE COORD TO MULTICAST THE UPDATE REQUEST
+
+  /**
+   * Increments the current request counter, prepares and sends an update request to replicas,
+   * and manages necessary data structures for tracking acknowledgements and pending requests.
+   *
+   * @param value The integer value to be updated.
+   * @param sender The actor reference of the sender initiating the update request.
+   */
   private void requestUpdate(Integer value, ActorRef sender) {
     currentRequest++;
     EpochSeqNum esn = new EpochSeqNum(epochSeqNumPair.currentEpoch, currentRequest);
@@ -412,14 +457,14 @@ public class Replica extends Node {
     // The replica will remove the message from its pending list once the writeOk is received
     pendingRequests.put(esn, sender);
   }
-  
 
 
-  /**
-   ****************************** ELECTION METHODS AND CLASSES ********************************
+   /**
+   * Handles the HeartbeatTimeout message indicating that the coordinator is not responding,
+   * initiating the election algorithm on this node, which detected the coordinator's absence.
+   *
+   * @param msg The HeartbeatTimeout message indicating the timeout event.
    */
-
-  // COORDINATOR CRASHED, THIS NODE IS THE ONE WHICH DETECTED THE CRASH, THUS THE INITIATOR OF THE ELECTION ALGO
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
     log("Coordinator is not responding. Starting election.", LogLevel.DEBUG);
 
