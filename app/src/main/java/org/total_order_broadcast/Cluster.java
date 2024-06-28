@@ -14,13 +14,9 @@ import java.util.stream.Stream;
 import org.slf4j.MDC;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.total_order_broadcast.Client.RequestRead;
-import org.total_order_broadcast.Client.Supervise;
-import org.total_order_broadcast.Node.CrashCoord;
-import org.total_order_broadcast.Node.CrashMsg;
-import org.total_order_broadcast.Node.JoinGroupMsg;
-import org.total_order_broadcast.Node.ReadHistory;
-import org.total_order_broadcast.Node.WriteDataMsg;
+import org.total_order_broadcast.Client.*;
+import org.total_order_broadcast.Node.*;
+
 
 public class Cluster {
   private static Map<String, String> contextMap =  new HashMap<>();
@@ -90,6 +86,7 @@ public class Cluster {
     int replicaId = 0;
     int input = 0;
     ActorRef replica;
+    List<ActorRef> replicas = new ArrayList<>();
     ActorRef client;
     String[] clientNames = clients.stream().map(c -> c.path().name()).toArray(String[]::new);
     String[] replicaNames = group.stream().map(r -> r.path().name()).toArray(String[]::new);
@@ -99,13 +96,16 @@ public class Cluster {
       try {
         String[] actions = {
             "Exit",
-            "Update",
-            "Read",
-            "Crash",
-            "Crash coordinator",
-            "Update and crash",
+            "Update: choose a client to trigger the update",
+            "Read: choose a client to read the latest value",
             "Concurrent updates",
-            "Coordinator crash in middle of update",
+            "Crash: choose a replica to crash",
+            "Crash coordinator",
+            "Update and crash: choose a client to trigger the update and crash its replica",
+            "Coordinator crash in middle of updates (before acks are received)",
+            "Coordinator crash in middle of updates (before request is sent to replicas)",
+            "Crash replica in election coordinator",
+            "Crash two replicas in election coordinator",
             "Read history",
           };
 
@@ -132,44 +132,66 @@ public class Cluster {
             client.tell(new RequestRead(), client);
             break;
           case 3:
+            // Concurrent updates
+            for(ActorRef c : clients){
+              c.tell(new WriteDataMsg(updateValue++, c), c);
+            }
+            break;
+          case 4:
             // Crash replica
             replicaId = readInput(in, replicaNames);
             if (replicaId == -1) break;
             replica = group.get(replicaId);
             replica.tell(new CrashMsg(), replica);
             break;
-          case 4:
+          case 5:
             // Crash coordinator
             supervisor.tell(new CrashCoord(), supervisor);
             break;
-          case 5:
-            // Update and crash
+          case 6:
+            // Update and crash replica
             clientId = readInput(in, clientNames);
             if (clientId == -1) break;
             client = clients.get(clientId);
             boolean shouldCrash = true;
             client.tell(new WriteDataMsg(updateValue++, client, shouldCrash), client);
             break;
-          case 6:
-            // Concurrent updates
-            int clientId1 = readInput(in, clientNames);
-            String[] filteredClientNames = Stream.of(clientNames).filter(name -> !name.equals(clientNames[clientId1])).toArray(String[]::new);
-            int clientId2 = readInput(in, filteredClientNames);
-            if (clientId1 == -1 || clientId2 == -1) break;
-            client = clients.get(clientId1);
-            ActorRef client2 = clients.get(clientId2);
-            client.tell(new WriteDataMsg(updateValue++, client), client);
-            client2.tell(new WriteDataMsg(updateValue++, client2), client2);
-            break;
           case 7:
-            // Concurrent updates
+            //Coordinator crash in middle of updates (before request is sent to replicas)
+            for(ActorRef c : clients){
+              c.tell(new WriteDataMsg(updateValue++, c), c);
+            }
+            supervisor.tell(new CrashCoord(), supervisor);
+            break;
+          case 8:
+            //Coordinator crash in middle of updates (before acks are received)
             for(ActorRef c : clients){
               c.tell(new WriteDataMsg(updateValue++, c), c);
             }
             Node.delay(200);
             supervisor.tell(new CrashCoord(), supervisor);
             break;
-          case 8:
+          case 9:
+            //Crash replica in election coordinator
+            replicaId = readInput(in, replicaNames);
+            if (replicaId == -1) break;
+            replica = group.get(replicaId);
+            supervisor.tell(new CrashCoord(), supervisor);
+            Node.delay(Node.HEARTBEAT_TIMEOUT_DURATION + 1000);
+            replica.tell(new CrashMsg(), replica);
+            break;
+          case 10:
+            //Crash two replicas in election coordinator
+            for(int i = 0; i < 2; i++){
+              replicaId = readInput(in, replicaNames);
+              if (replicaId == -1) break;
+              replicas.add(group.get(replicaId));
+            }
+            supervisor.tell(new CrashCoord(), supervisor);
+            Node.delay(Node.HEARTBEAT_TIMEOUT_DURATION + 1000);
+            replicas.forEach(r -> r.tell(new CrashMsg(), r));
+            break;
+          case 11:
             // Read history
             supervisor.tell(new ReadHistory(), supervisor);
             break;

@@ -137,6 +137,7 @@ public class Replica extends Node {
       .match(Heartbeat.class, this::onHeartbeat)
       .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
       .match(RestartElection.class, this::onRestartElection)
+      .match(ElectionRestated.class, this::onElectionRestarted)
       .match(ElectionTimeout.class, this::onElectionTimeout)
       .match(ElectionAck.class, this::onElectionAck)
       .match(ElectionMessage.class, this::onElectionMessageReceipt)
@@ -486,7 +487,9 @@ public class Replica extends Node {
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
     deferringMessages = false;
-          
+     
+    renewHeartbeatTimeout();
+    
     if(electionTimeout != null){
       log("Cancelling election timeout", LogLevel.INFO);
       electionTimeout.cancel();
@@ -573,6 +576,18 @@ public class Replica extends Node {
     log("Restarting election", LogLevel.INFO);
     setElectionTimeout = false;
     nextHop = -1;
+    multicast(new ElectionRestated());
+  }
+
+  public void onElectionRestarted(ElectionRestated msg) {
+    log("Election restarted", LogLevel.INFO);
+    
+    if(electionTimeout != null){
+      electionTimeout.cancel();
+    }
+
+    setElectionTimeout = false;
+    nextHop = -1;
     startElection();
   }
 
@@ -588,11 +603,11 @@ public class Replica extends Node {
     // next hop will NEVER be this node
     voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, replicasInEpoch));
 
-    // if(!setElectionTimeout){
-    //   log("Setting election timeout", LogLevel.INFO);
-    //   electionTimeout = setTimeout(ELECTION_TIMEOUT, new RestartElection());
-    //   setElectionTimeout = true;
-    // }
+    if(!setElectionTimeout){
+      log("Setting election timeout", LogLevel.INFO);
+      electionTimeout = setTimeout(ELECTION_TIMEOUT, new RestartElection());
+      setElectionTimeout = true;
+    }
   }
 
   /**

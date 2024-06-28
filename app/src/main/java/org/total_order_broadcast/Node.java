@@ -67,14 +67,14 @@ public abstract class Node extends AbstractActor {
   protected  Map<Integer, Set<ActorRef>> flushes;
 
   // Hearbeat
-  protected final int HEARTBEAT_TIMEOUT_DURATION = 4000;
-  protected final int HEARTBEAT_INTERVAL = 2000;
-  protected final int VOTE_TIMEOUT = 5000;
+  final static int HEARTBEAT_TIMEOUT_DURATION = 4000;
+  final static int HEARTBEAT_INTERVAL = 2000;
+  final static int VOTE_TIMEOUT = 5000;
   final static int N_PARTICIPANTS = 5;
   final static int MAX_DELAY = 500; // max network delay, ms
   final static int READ_TIMEOUT = 500; // timeout to respond to a client, ms
-  final static int DECISION_TIMEOUT = 5000; // timeout for the decision, ms
-  final static int ELECTION_TIMEOUT = 50000; // timeout for the election, ms
+  final static int DECISION_TIMEOUT = 1000; // timeout for the decision, ms
+  final static int ELECTION_TIMEOUT = 8000; // timeout for the election, ms
 
   protected Logger logger; 
 
@@ -213,6 +213,8 @@ public abstract class Node extends AbstractActor {
   }
 
   public static class RestartElection implements Serializable {}
+
+  public static class ElectionRestated implements Serializable {}
 
   public static class WriteDataMsg implements Serializable {
     public final Integer value;
