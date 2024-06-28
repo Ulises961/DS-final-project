@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -89,7 +90,7 @@ public abstract class Node extends AbstractActor {
     this.membersSeqno = new HashMap<>();
     this.deferredMsgSet = new HashSet<>();
     this.quorum = (N_PARTICIPANTS / 2) + 1;
-    updateHistory = new HashMap<>();
+    updateHistory = new TreeMap<>();
     updateHistory.put(epochSeqNumPair, 0);
     logger = LoggerFactory.getLogger(Node.class);
   }
@@ -364,8 +365,8 @@ public abstract class Node extends AbstractActor {
       currentValue = v;
       updateHistory.put(epochSeqNum, v);
       epochSeqNumPair = epochSeqNum;
-      log("Committed value " + currentValue, LogLevel.INFO);
-      log("Update History " + updateHistory.toString(), LogLevel.DEBUG);
+      log("update " + epochSeqNumPair.getCurrentEpoch() + ":" + epochSeqNumPair.seqNum +" " + currentValue, LogLevel.INFO);
+      log("Update History " + updateHistory, LogLevel.DEBUG);
     }
   }
 

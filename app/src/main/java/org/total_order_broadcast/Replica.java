@@ -128,7 +128,7 @@ public class Replica extends Node {
       .match(CrashMsg.class, this::onCrash)
       .match(ElectionMessage.class, this::onElectionMessageReceipt)
       .match(ReadHistory.class, this::onReadHistory)
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.INFO))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.DEBUG))
       .build();
   }
       
@@ -149,7 +149,7 @@ public class Replica extends Node {
       .match(FlushMsg.class, this::onFlushMessage)
       .match(ViewChangeMsg.class, this::onViewChange)
       .match(CrashMsg.class, this::onCrash)
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.INFO))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.DEBUG))
       .build();
   }
   
@@ -390,7 +390,7 @@ public class Replica extends Node {
 
   public void onElectionMessageReceipt(ElectionMessage electionMessage){
 
-    log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " + getSender().path().name() +" local proposed coordinator " + this.proposedCoordinatorID, LogLevel.INFO);
+    log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " + getSender().path().name(), LogLevel.INFO);
 
     // send ack to whoever sent the message
     if (hasReceivedElectionMessage && !hasBeenUpdated(electionMessage)){
@@ -499,13 +499,13 @@ public class Replica extends Node {
     }
     
     if(pendingMsg.size() > 0){
-      log("Solve pending messages coordinator " + coordinator.path().name() , LogLevel.INFO);
+      log("Solve pending messages", LogLevel.INFO);
       // Retry pending messages from current epoch
       for(WriteDataMsg msg : pendingMsg){
         coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
       }
     } else {
-      log("No pending messages coordinator " + coordinator.path().name(), LogLevel.INFO);
+      log("No pending messages", LogLevel.INFO);
       coordinator.tell(new FlushMsg(), getSelf());
     }
   
@@ -517,11 +517,9 @@ public class Replica extends Node {
     if (isCoordinator()) {
       Set<ActorRef> participants = proposedView.get(epochSeqNumPair.currentEpoch);
       flushedReplicas.add(getSender());
-      log("Flushed replicas: " + flushedReplicas.toString(), LogLevel.INFO);
-      log("Participants: " + participants.toString(), LogLevel.INFO);
-      log("Can propose view: " + (flushedReplicas.size() >= participants.size()), LogLevel.INFO);
+      log("Flushed replicas: " + flushedReplicas.toString(), LogLevel.DEBUG);
+      log("Can propose view: " + (flushedReplicas.size() >= participants.size()), LogLevel.DEBUG);
       if (flushedReplicas.size() >= participants.size()) {
-        log("Proposed view: " + participants.toString(), LogLevel.INFO);
         multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0), participants, coordinator));
         currentRequest = 0;
         log("View change message sent", LogLevel.INFO);
@@ -535,7 +533,6 @@ public class Replica extends Node {
 
     for(ActorRef participant : msg.proposedView){
       currentView.add(participant);
-      log("New participant added: " + participant.path().name(), LogLevel.INFO);
     }
 
 
