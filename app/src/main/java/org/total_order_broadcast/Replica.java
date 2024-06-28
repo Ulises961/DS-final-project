@@ -489,10 +489,11 @@ public class Replica extends Node {
       updateCoordinator(proposedCoord);
       cleanUp();
       voteTimeout.cancel();
+      
       if (isCoordinator()) {
         log("Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
         Set<ActorRef> activeReplicas = electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch);
-        log("New view established " + activeReplicas, Cluster.LogLevel.INFO);
+        log("New view established " + activeReplicas, LogLevel.INFO);
         updateQuorum(activeReplicas.size());
         this.proposedView.put(epochSeqNumPair.currentEpoch, activeReplicas);
         flushes.put(epochSeqNumPair.currentEpoch, new HashSet<>());
@@ -627,12 +628,15 @@ public class Replica extends Node {
       log("Flushed replicas: " + flushedReplicas.toString(), Cluster.LogLevel.DEBUG);
       log("Can propose view: " + (flushedReplicas.size() >= participants.size()), Cluster.LogLevel.DEBUG);
       if (flushedReplicas.size() >= participants.size()) {
+        
         epochSeqNumPair = new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0);
-        currentView.clear();
-        currentView.addAll(participants);
-        multicastExcept(new ViewChangeMsg(epochSeqNumPair, participants, coordinator), getSelf());
         currentRequest = 0;
         supervisor.tell(new Client.SetCoordinator(), getSelf());
+        // Tell the coordinator to change the view first
+        getSelf().tell(new ViewChangeMsg(epochSeqNumPair, participants, getSelf()), getSelf());
+        // Then tell the rest of the replicas
+        multicastExcept(new ViewChangeMsg(epochSeqNumPair, participants, coordinator), getSelf());
+
         log("View change message sent", LogLevel.INFO);
       }
     }
@@ -648,7 +652,8 @@ public class Replica extends Node {
     currentView.clear();
     epochSeqNumPair = msg.esn;
     currentView.addAll(msg.proposedView);
-
+    deferringMessages = false;
+    nextHop = -1;
     if(!isCoordinator()){
       renewHeartbeatTimeout();
     }
@@ -657,7 +662,6 @@ public class Replica extends Node {
     log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
     getContext().become(createReceive());
     
-    deferringMessages = false;
 
     for(WriteDataMsg writeDataMsg : deferredMsgSet){
       onUpdateMessage(writeDataMsg);
@@ -764,7 +768,6 @@ public class Replica extends Node {
   private int sendElectionMsg(ElectionMessage electionMessage, int next){
     List<ActorRef> participants = new LinkedList<ActorRef>(currentView);
     Collections.sort(participants, (a, b) -> a.path().name().compareTo(b.path().name()));
-
     if (next == -1) {
       int pos = participants.indexOf(getSelf());
       participants.get((pos + 1) % participants.size()).tell(electionMessage, getSelf());
