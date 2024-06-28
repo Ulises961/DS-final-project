@@ -489,7 +489,7 @@ public class Replica extends Node {
     deferringMessages = false;
      
     renewHeartbeatTimeout();
-    
+
     if(electionTimeout != null){
       log("Cancelling election timeout", LogLevel.INFO);
       electionTimeout.cancel();
@@ -538,7 +538,8 @@ public class Replica extends Node {
       currentView.add(participant);
     }
 
-
+    renewHeartbeatTimeout();
+    
     log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
     log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
     getContext().become(createReceive());
