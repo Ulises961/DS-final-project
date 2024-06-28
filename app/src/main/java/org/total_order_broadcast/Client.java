@@ -67,6 +67,7 @@ public class Client extends Node {
 
     public static class SetCoordinator {}
 
+
     public static class Supervise {}
 
     /**
@@ -82,6 +83,9 @@ public class Client extends Node {
         }
     }
 
+    /**
+     * Inner class representing a request to read data from the server.
+     */
     public static class RequestRead {}
 
       @Override
@@ -97,7 +101,12 @@ public class Client extends Node {
             .match(Supervise.class, this::onSupervise)
             .build();
     }
-   
+
+    /**
+     * Initializes the client actor's behavior for supervision messages.
+     *
+     * @return Receive object defining the supervision message handling behavior.
+     */
     public Receive supervise() {
         return receiveBuilder()
             .match(SetCoordinator.class, this::onSetCoordinator)
