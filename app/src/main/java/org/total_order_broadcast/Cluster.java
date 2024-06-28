@@ -6,6 +6,7 @@ import akka.actor.ActorSystem;
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
@@ -115,7 +116,10 @@ public class Cluster {
     ActorRef replica;
     List<ActorRef> replicas = new ArrayList<>();
     ActorRef client;
-    String[] clientNames = clients.stream().map(c -> c.path().name()).toArray(String[]::new);
+    String[] clientNames = clients.stream().map(c -> c.path().name()).sorted().toArray(String[]::new);
+    
+    // Sort replicas by name
+    group = group.stream().sorted((r1,r2)-> r1.path().name().compareTo(r2.path().name())).toList();
     String[] replicaNames = group.stream().map(r -> r.path().name()).toArray(String[]::new);
 
     while (!exit) {
@@ -169,6 +173,7 @@ public class Cluster {
             replicaId = readInput(in, replicaNames);
             if (replicaId == -1) break;
             replica = group.get(replicaId);
+            logWithMDC("Crashing replica: " + replica.path().name(), contextMap, logger, LogLevel.INFO);
             replica.tell(new CrashMsg(), replica);
             break;
           case 5:
