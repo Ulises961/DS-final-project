@@ -64,6 +64,9 @@ public class Replica extends Node {
   //Flushes for each epoch
   protected final Map<Integer, Set<ActorRef>> flushes;
 
+  // Flushed replicas for the current epoch
+  private Set<ActorRef> flushedReplicas;
+  // Election timeout
   private boolean setElectionTimeout;
 
   public Replica(int id) {
@@ -131,6 +134,8 @@ public class Replica extends Node {
       
   public Receive electionMode() {
     return receiveBuilder()
+      .match(Heartbeat.class, this::onHeartbeat)
+      .match(HeartbeatTimeout.class, this::onHeartbeatTimeout)
       .match(RestartElection.class, this::onRestartElection)
       .match(ElectionTimeout.class, this::onElectionTimeout)
       .match(ElectionAck.class, this::onElectionAck)
@@ -142,7 +147,6 @@ public class Replica extends Node {
       .match(UpdateAck.class, this::onUpdateAck)
       .match(WriteOk.class, this::onWriteOk)
       .match(FlushMsg.class, this::onFlushMessage)
-      .match(FlushCompleteMsg.class, this::onFlushComplete)
       .match(ViewChangeMsg.class, this::onViewChange)
       .match(CrashMsg.class, this::onCrash)
       .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.INFO))
@@ -249,7 +253,6 @@ public class Replica extends Node {
   public void onUpdateRequest(UpdateRequest msg) {
     // Updates must be monotonically increasing within the latest epoch
     log("Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum, LogLevel.INFO);
-    requestHasQuorum.put(msg.epochSeqNum, true);
     coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
     
     if(updateTimeOut != null) {
@@ -265,7 +268,7 @@ public class Replica extends Node {
 
   // COORDINATOR RECEIVES ACKS AND SENDS WRITEOK
   public void onUpdateAck(UpdateAck ack) {
-    log("Is Ack expected: " + isAckExpected(ack.epochSeqNum), LogLevel.INFO);
+    log("Is Ack" + ack.epochSeqNum + " expected: " + isAckExpected(ack.epochSeqNum), LogLevel.INFO);
     if (isAckExpected(ack.epochSeqNum)) {
       ActorRef sender = getSender();
       Set<ActorRef> voters = receivedAcks.get(ack.epochSeqNum);
@@ -302,50 +305,55 @@ public class Replica extends Node {
       // Check if there are any pending writes that can now be committed
       while(unstableWrites.containsKey(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1))){
         WriteOk writeOk = unstableWrites.get(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1));
+        
         log("Committing deferred value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum, LogLevel.INFO);
+        
         commitDecision(writeOk.value, writeOk.epochSeqNum);
         unstableWrites.remove(writeOk.epochSeqNum);
       }
+
     } else if(msg.epochSeqNum.seqNum >= epochSeqNumPair.seqNum){
-      log("Message already committed " + msg.value + " seq num " + msg.epochSeqNum, LogLevel.INFO);
+      log("Message already committed " + msg.value + " seq num " + msg.epochSeqNum, LogLevel.DEBUG);
     } else {
-      log("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, LogLevel.INFO);
+      log("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, LogLevel.DEBUG);
+      
       // Defer commit until the correct sequence number is reached
       unstableWrites.put(msg.epochSeqNum, msg);
     } 
 
-    log("Message proposer " + msg.proposer.path().name() + " self " + getSelf() + " are they equal? " + msg.proposer.equals(getSelf()), LogLevel.INFO);
-    
     // Remove the message from the pending list
     if(msg.proposer.equals(getSelf())){
       Iterator<WriteDataMsg> iterator = pendingMsg.iterator();
-      log("Pending messages: " + pendingMsg.toString(), LogLevel.INFO);
-
+      log("Pending messages: " + pendingMsg, LogLevel.INFO);
+      
       while (iterator.hasNext()) {
-          WriteDataMsg currentMsg = iterator.next();
-          if (currentMsg.value == msg.value) {
-              log("Removing pending message: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, LogLevel.INFO);
-              iterator.remove();
-              break; // Exit the loop after removing the first match
-          }
+        WriteDataMsg currentMsg = iterator.next();
+        if (currentMsg.value == msg.value) {
+          log("Removing pending message: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, LogLevel.INFO);
+          iterator.remove();
+          break; // Exit the loop after removing the first match
+        }
       }
-
+      
+      log("Remaining messages: " + pendingMsg, LogLevel.INFO);
+     
       if (isCoordinator()) {
         // Remove the message from the pending requests list
         pendingRequests.remove(msg.epochSeqNum);
       } 
 
+      log("Is pending message empty: " + pendingMsg.isEmpty(), LogLevel.DEBUG);
       // After all messages have been committed, send a flush message to change the view
       if(pendingMsg.isEmpty()){
-        log("All pending messages have been committed, tell coordinator " + coordinator.path().name(), LogLevel.INFO);
-        coordinator.tell(new FlushCompleteMsg(epochSeqNumPair.getCurrentEpoch()), getSelf());
+        log("All pending messages have been committed, tell coordinator " + coordinator.path().name(), LogLevel.DEBUG);
+        coordinator.tell(new FlushMsg(), getSelf());
 
       }
     } 
   }
 
   private boolean isAckExpected(EpochSeqNum epochSeqNum) {
-    return requestHasQuorum.get(epochSeqNum);
+    return !requestHasQuorum.get(epochSeqNum);
   }
   
   // USED BY THE COORD TO MULTICAST THE UPDATE REQUEST
@@ -372,7 +380,7 @@ public class Replica extends Node {
 
   // COORDINATOR CRASHED, THIS NODE IS THE ONE WHICH DETECTED THE CRASH, THUS THE INITIATOR OF THE ELECTION ALGO
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
-    log("Coordinator is not responding. Starting election.", LogLevel.INFO);
+    log("Coordinator is not responding. Starting election.", LogLevel.DEBUG);
 
     getContext().become(electionMode());
     deferringMessages = true;
@@ -382,29 +390,34 @@ public class Replica extends Node {
 
   public void onElectionMessageReceipt(ElectionMessage electionMessage){
 
+    log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " + getSender().path().name() +" local proposed coordinator " + this.proposedCoordinatorID, LogLevel.INFO);
+
     // send ack to whoever sent the message
     if (hasReceivedElectionMessage && !hasBeenUpdated(electionMessage)){
       // END ELECTION
       updateCoordinator(proposedCoord);
       cleanUp();
       voteTimeout.cancel();
-      if (isCoordinator()){
-        log("Coordinator in the new view: " + coordinator.path().name(), LogLevel.DEBUG);
+      if (isCoordinator()) {
+        log("Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
         deferringMessages = false;
         Set<ActorRef> activeReplicas = electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch);
+        log("New view established " + activeReplicas, LogLevel.INFO);
         updateQuorum(activeReplicas.size());
         this.proposedView.put(epochSeqNumPair.currentEpoch, activeReplicas);
         flushes.put(epochSeqNumPair.currentEpoch, new HashSet<>());
         multicast(new SyncMessage(updateHistory));
         multicast(new Heartbeat());
-      }else{
+      } else {
         // set timeout in case new coordinator also crashed
         heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
       }
     } else {
-
       // Someone else has discovered a crashed coordinator, no need to trigger another election
-      heartbeatTimeout.cancel();
+      if(heartbeatTimeout != null){
+        heartbeatTimeout.cancel();
+      }
+
       deferringMessages = true;
       hasReceivedElectionMessage = true;
       
@@ -417,6 +430,7 @@ public class Replica extends Node {
       // view update content
       proposedCoord = electionMessage.proposedCoordinator;
       proposedCoordinatorID = electionMessage.proposedCoordinatorID;
+      updateCoordinator(proposedCoord);
 
       List<EpochSeqNum> epochSeqNumList = new LinkedList<>(electionMessage.updateHistory.keySet());
       
@@ -424,6 +438,7 @@ public class Replica extends Node {
       // sorting epochs-seqNums in decreasing order;
       epochSeqNumList.sort((o1, o2) -> o1.currentEpoch < o2.currentEpoch ? 1 : -1);
       if (epochSeqNumList.get(0).getCurrentEpoch() > this.epochSeqNumPair.getCurrentEpoch()) {
+        log("I'm behind, updating history", LogLevel.DEBUG);
         // if we're here we missed out 1+ epochs, we must update our history
         int diff = Math.abs(epochSeqNumList.get(0).getCurrentEpoch() - this.epochSeqNumPair.getCurrentEpoch());
         // since epoch updates are sequential we can iterate over the difference diff.
@@ -445,14 +460,18 @@ public class Replica extends Node {
         proposedCoord = getSelf();
         proposedCoordinatorID = this.id;
         update = this.updateHistory;
+
+        log("I have the latest version", LogLevel.DEBUG);
       } else {
         // everything matches, break ties using node id
         proposedCoordinatorID = Math.max(proposedCoordinatorID, this.id);
         proposedCoord = proposedCoordinatorID == this.id ? getSelf() : proposedCoord;
+        log("Tie breaker: " + proposedCoordinatorID, LogLevel.DEBUG);
       }
 
-      log("Received election message from " + getSender().path().name() + ". Proposed coordinator: " + proposedCoordinatorID, LogLevel.INFO);
-      sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.activeReplicas), nextHop);
+      log("Updated proposed coordinator: " + proposedCoordinatorID + " message coordinator " + electionMessage.proposedCoordinatorID + " next hop " + nextHop, LogLevel.DEBUG);
+      
+      nextHop = sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.activeReplicas), nextHop);
 
       if(voteTimeout != null){
         voteTimeout.cancel();
@@ -466,25 +485,41 @@ public class Replica extends Node {
     this.updateHistory = new HashMap<>(sm.updateHistory);
     deferringMessages = false;
     
+    flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
+      
     if(electionTimeout != null){
       log("Cancelling election timeout", LogLevel.INFO);
       electionTimeout.cancel();
       setElectionTimeout = false;
     }
-    
-    // Retry pending messages from current epoch
-    for(WriteDataMsg msg : pendingMsg){
-      coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
+
+    if(voteTimeout != null){
+      log("Cancelling vote timeout", LogLevel.INFO);
+      voteTimeout.cancel();
     }
+    
+    if(pendingMsg.size() > 0){
+      log("Solve pending messages coordinator " + coordinator.path().name() , LogLevel.INFO);
+      // Retry pending messages from current epoch
+      for(WriteDataMsg msg : pendingMsg){
+        coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
+      }
+    } else {
+      log("No pending messages coordinator " + coordinator.path().name(), LogLevel.INFO);
+      coordinator.tell(new FlushMsg(), getSelf());
+    }
+  
   }
 
   public void onFlushMessage(FlushMsg msg) {
     log("Received flush message from replica " + getSender().path().name(), LogLevel.INFO);
 
     if (isCoordinator()) {
-      Set<ActorRef> flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
-      flushedReplicas.add(getSender());
       Set<ActorRef> participants = proposedView.get(epochSeqNumPair.currentEpoch);
+      flushedReplicas.add(getSender());
+      log("Flushed replicas: " + flushedReplicas.toString(), LogLevel.INFO);
+      log("Participants: " + participants.toString(), LogLevel.INFO);
+      log("Can propose view: " + (flushedReplicas.size() >= participants.size()), LogLevel.INFO);
       if (flushedReplicas.size() >= participants.size()) {
         log("Proposed view: " + participants.toString(), LogLevel.INFO);
         multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0), participants, coordinator));
@@ -526,9 +561,6 @@ public class Replica extends Node {
     }
   }
 
-  public void onFlushComplete(FlushCompleteMsg msg) {
-    coordinator.tell(new FlushMsg(), getSelf());
-  }
 
   // if nextHop has crashed, we try with the node after that, until someone sends back an Ack
   public void onElectionTimeout(ElectionTimeout msg) {
@@ -537,7 +569,7 @@ public class Replica extends Node {
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.activeReplicas),msg.next);
     // set timeout with nextHop+1
     voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, msg.activeReplicas));
-    log(" Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
+    log("Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
   } 
   
   public void onRestartElection(RestartElection msg) {
@@ -557,22 +589,23 @@ public class Replica extends Node {
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory, getSelf(), this.id, replicasInEpoch), nextHop);
     // because of the assumption that there will ALWAYS be a quorum we can safely say that
     // next hop will NEVER be this node
-    voteTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new ElectionTimeout(nextHop, replicasInEpoch));
+    voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, replicasInEpoch));
 
-    if(!setElectionTimeout){
-      log("Setting election timeout", LogLevel.INFO);
-      electionTimeout = setTimeout(ELECTION_TIMEOUT, new RestartElection());
-      setElectionTimeout = true;
-    }
+    // if(!setElectionTimeout){
+    //   log("Setting election timeout", LogLevel.INFO);
+    //   electionTimeout = setTimeout(ELECTION_TIMEOUT, new RestartElection());
+    //   setElectionTimeout = true;
+    // }
   }
 
   /**
    *  Logic: sort list of participants, get replica whose id > this.id, then try to send, if timeout update nextHop
    */
   private int sendElectionMsg(ElectionMessage electionMessage, int next){
-    List<ActorRef> participants = new LinkedList<>(currentView);
+    List<ActorRef> participants = new LinkedList<ActorRef>(currentView);
+    Collections.sort(participants, (a, b) -> a.path().name().compareTo(b.path().name()));
+
     if (next == -1) {
-      Collections.sort(participants);
       int pos = participants.indexOf(getSelf());
       participants.get((pos + 1) % participants.size()).tell(electionMessage, getSelf());
       return (pos + 1) % participants.size();

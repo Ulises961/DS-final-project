@@ -47,6 +47,10 @@ public class Client extends Node {
         public UpdateRequest(Integer value, ActorRef sender, boolean shouldCrash){
             super(value, sender, shouldCrash);
         }
+
+        public String toString() {
+            return "UpdateRequest(" + value + ")";
+        }
     }
 
     public static class RequestRead {}
