@@ -1,5 +1,7 @@
 package org.total_order_broadcast;
 
+import org.total_order_broadcast.LogLevel;
+
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 
@@ -9,7 +11,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
 import org.slf4j.MDC;
 import org.slf4j.Logger;
