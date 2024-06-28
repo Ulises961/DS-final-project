@@ -80,7 +80,7 @@ public class Replica extends Node {
     contextMap = new HashMap<>();
     contextMap.put("replicaId", String.valueOf(id));
     flushes = new HashMap<>();
-    log("Replica " + id + " created", LogLevel.INFO);
+    log("Replica " + id + " created", Cluster.LogLevel.INFO);
   }
 
   @Override
@@ -140,7 +140,7 @@ public class Replica extends Node {
       .match(CrashMsg.class, this::onCrash)
       .match(ElectionMessage.class, this::onElectionMessageReceipt)
       .match(ReadHistory.class, this::onReadHistory)
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", LogLevel.DEBUG))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (normal mode)", Cluster.LogLevel.DEBUG))
       .build();
   }
       
@@ -162,7 +162,7 @@ public class Replica extends Node {
       .match(FlushMsg.class, this::onFlushMessage)
       .match(ViewChangeMsg.class, this::onViewChange)
       .match(CrashMsg.class, this::onCrash)
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.DEBUG))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", Cluster.LogLevel.DEBUG))
       .build();
   }
 
@@ -191,7 +191,7 @@ public class Replica extends Node {
    */
    public void onTimeout(UpdateTimeOut msg) {
     // If the coordinator does not respond, the replica starts an election
-    log("Timeout for update request: " + msg.epochSeqNum, LogLevel.INFO);
+    log("Timeout for update request: " + msg.epochSeqNum, Cluster.LogLevel.INFO);
     onHeartbeatTimeout(new HeartbeatTimeout());
   }
 
@@ -203,7 +203,7 @@ public class Replica extends Node {
    */
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
     msg.sender.tell(new DataMsg(getValue()), getSelf());
-    log("Read from client: " + getSender().path().name() + ". Value returned: " + currentValue, LogLevel.DEBUG);
+    log("Read from client: " + getSender().path().name() + ". Value returned: " + currentValue, Cluster.LogLevel.DEBUG);
   }
 
   /**
@@ -229,7 +229,7 @@ public class Replica extends Node {
    * @param msg the {@code ICMPRequest} message received, indicating a ping request.
    */
   public void onPing(ICMPRequest msg) {
-    log("Received ping from " + getSender().path().name(), LogLevel.DEBUG);
+    log("Received ping from " + getSender().path().name(), Cluster.LogLevel.DEBUG);
     getSender().tell(new ICMPResponse(), getSelf());
   }
 
@@ -256,10 +256,10 @@ public class Replica extends Node {
     // Defer messages during election. New messages make part of the next epoch
     if(deferringMessages) {
       deferredMsgSet.add(msg);
-      log("Deferring message: " + msg.value, LogLevel.INFO);
+      log("Deferring message: " + msg.value, Cluster.LogLevel.INFO);
     } else {
       if (isCoordinator()) {
-        log("Received Write request from " + getSender().path().name() + " with value " + msg.value, LogLevel.INFO);
+        log("Received Write request from " + getSender().path().name() + " with value " + msg.value, Cluster.LogLevel.INFO);
         
         // If the sender in the message is different from the sender of the message
         // it was forwarded by a replica
@@ -270,14 +270,14 @@ public class Replica extends Node {
         }
 
       } else {
-        log("Received update message from client " + msg.sender.path().name() + " with value: " + msg.value, LogLevel.INFO);
-        log("Forwarding update message to coordinator: " + coordinator.path().name() + " with value " + msg.value, LogLevel.DEBUG);
+        log("Received update message from client " + msg.sender.path().name() + " with value: " + msg.value, Cluster.LogLevel.INFO);
+        log("Forwarding update message to coordinator: " + coordinator.path().name() + " with value " + msg.value, Cluster.LogLevel.DEBUG);
         // forward request to the coordinator, do not propagate the shouldCrash flag
         coordinator.tell(new WriteDataMsg(msg.value, getSelf()), getSelf());
         
         // Keep message in memory as pending
         pendingMsg.add(msg);
-        log("Pending message: " + msg.value, LogLevel.DEBUG);
+        log("Pending message: " + msg.value, Cluster.LogLevel.DEBUG);
 
         // Set a timeout for the update request
         if(updateTimeOut != null) {
@@ -303,7 +303,7 @@ public class Replica extends Node {
    */
   public void onUpdateRequest(UpdateRequest msg) {
     // Updates must be monotonically increasing within the latest epoch
-    log("Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum, LogLevel.INFO);
+    log("Received update request from coordinator. Value: " + msg.value + " SeqNum: " + msg.epochSeqNum, Cluster.LogLevel.INFO);
     coordinator.tell(new UpdateAck(msg.value, msg.epochSeqNum), getSelf());
     
     if(updateTimeOut != null) {
@@ -326,13 +326,13 @@ public class Replica extends Node {
    *            epoch sequence number, and sender information.
    */
   public void onUpdateAck(UpdateAck ack) {
-    log("Is Ack" + ack.epochSeqNum + " expected: " + isAckExpected(ack.epochSeqNum), LogLevel.INFO);
+    log("Is Ack" + ack.epochSeqNum + " expected: " + isAckExpected(ack.epochSeqNum), Cluster.LogLevel.INFO);
     if (isAckExpected(ack.epochSeqNum)) {
       ActorRef sender = getSender();
       Set<ActorRef> voters = receivedAcks.get(ack.epochSeqNum);
       voters.add(sender);
       if (voters.size() >= quorum) { // enough acks received, now send WRITEOK message
-        log("Quorum reached, sending Ok for value " + ack.value, LogLevel.INFO);
+        log("Quorum reached, sending Ok for value " + ack.value, Cluster.LogLevel.INFO);
         ActorRef proposer = pendingRequests.get(ack.epochSeqNum);
         multicast(new WriteOk(ack.value, ack.epochSeqNum, proposer));
         requestHasQuorum.put(ack.epochSeqNum,true); // update phase completed, no more acks expected
@@ -364,7 +364,7 @@ public class Replica extends Node {
 
     // Check if the message is the next in sequence
     if(msg.epochSeqNum.seqNum == epochSeqNumPair.seqNum + 1){
-      log("Committing value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, LogLevel.INFO);
+      log("Committing value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, Cluster.LogLevel.INFO);
 
       // store the decision
       commitDecision(msg.value, msg.epochSeqNum);
@@ -377,16 +377,16 @@ public class Replica extends Node {
       while(unstableWrites.containsKey(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1))){
         WriteOk writeOk = unstableWrites.get(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1));
         
-        log("Committing deferred value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum, LogLevel.INFO);
+        log("Committing deferred value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum, Cluster.LogLevel.INFO);
         
         commitDecision(writeOk.value, writeOk.epochSeqNum);
         unstableWrites.remove(writeOk.epochSeqNum);
       }
 
     } else if(msg.epochSeqNum.seqNum >= epochSeqNumPair.seqNum){
-      log("Message already committed " + msg.value + " seq num " + msg.epochSeqNum, LogLevel.DEBUG);
+      log("Message already committed " + msg.value + " seq num " + msg.epochSeqNum, Cluster.LogLevel.DEBUG);
     } else {
-      log("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, LogLevel.DEBUG);
+      log("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, Cluster.LogLevel.DEBUG);
       
       // Defer commit until the correct sequence number is reached
       unstableWrites.put(msg.epochSeqNum, msg);
@@ -395,28 +395,28 @@ public class Replica extends Node {
     // Remove the message from the pending list
     if(msg.proposer.equals(getSelf())){
       Iterator<WriteDataMsg> iterator = pendingMsg.iterator();
-      log("Pending messages: " + pendingMsg, LogLevel.INFO);
+      log("Pending messages: " + pendingMsg, Cluster.LogLevel.INFO);
       
       while (iterator.hasNext()) {
         WriteDataMsg currentMsg = iterator.next();
         if (currentMsg.value == msg.value) {
-          log("Removing pending message: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, LogLevel.INFO);
+          log("Removing pending message: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, Cluster.LogLevel.INFO);
           iterator.remove();
           break; // Exit the loop after removing the first match
         }
       }
       
-      log("Remaining messages: " + pendingMsg, LogLevel.INFO);
+      log("Remaining messages: " + pendingMsg, Cluster.LogLevel.INFO);
      
       if (isCoordinator()) {
         // Remove the message from the pending requests list
         pendingRequests.remove(msg.epochSeqNum);
       } 
 
-      log("Is pending message empty: " + pendingMsg.isEmpty(), LogLevel.DEBUG);
+      log("Is pending message empty: " + pendingMsg.isEmpty(), Cluster.LogLevel.DEBUG);
       // After all messages have been committed, send a flush message to change the view
       if(pendingMsg.isEmpty()){
-        log("All pending messages have been committed, tell coordinator " + coordinator.path().name(), LogLevel.DEBUG);
+        log("All pending messages have been committed, tell coordinator " + coordinator.path().name(), Cluster.LogLevel.DEBUG);
         coordinator.tell(new FlushMsg(), getSelf());
 
       }
@@ -449,7 +449,7 @@ public class Replica extends Node {
     Set<ActorRef> acks = new HashSet<>();
     receivedAcks.put(esn, acks);
     requestHasQuorum.put(esn, false);
-    log("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn, LogLevel.INFO);
+    log("Requesting update from replicas. Value proposed: " + value + " SeqNum: " + esn, Cluster.LogLevel.INFO);
     multicast(new UpdateRequest(value, esn));
 
     // Store in memory which replica initiated the request. 
@@ -466,7 +466,7 @@ public class Replica extends Node {
    * @param msg The HeartbeatTimeout message indicating the timeout event.
    */
   public void onHeartbeatTimeout(HeartbeatTimeout msg) {
-    log("Coordinator is not responding. Starting election.", LogLevel.DEBUG);
+    log("Coordinator is not responding. Starting election.", Cluster.LogLevel.DEBUG);
 
     getContext().become(electionMode());
     deferringMessages = true;
@@ -484,7 +484,7 @@ public class Replica extends Node {
    */
   public void onElectionMessageReceipt(ElectionMessage electionMessage){
 
-    log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " + getSender().path().name(), LogLevel.INFO);
+    log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " + getSender().path().name(), Cluster.LogLevel.INFO);
 
     // send ack to whoever sent the message
     if (hasReceivedElectionMessage && !hasBeenUpdated(electionMessage)){
@@ -493,10 +493,10 @@ public class Replica extends Node {
       cleanUp();
       voteTimeout.cancel();
       if (isCoordinator()) {
-        log("Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
+        log("Coordinator in the new view: " + coordinator.path().name(), Cluster.LogLevel.INFO);
         deferringMessages = false;
         Set<ActorRef> activeReplicas = electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch);
-        log("New view established " + activeReplicas, LogLevel.INFO);
+        log("New view established " + activeReplicas, Cluster.LogLevel.INFO);
         updateQuorum(activeReplicas.size());
         this.proposedView.put(epochSeqNumPair.currentEpoch, activeReplicas);
         flushes.put(epochSeqNumPair.currentEpoch, new HashSet<>());
@@ -538,7 +538,7 @@ public class Replica extends Node {
       // sorting epochs-seqNums in decreasing order;
       epochSeqNumList.sort((o1, o2) -> o1.currentEpoch < o2.currentEpoch ? 1 : -1);
       if (epochSeqNumList.get(0).getCurrentEpoch() > this.epochSeqNumPair.getCurrentEpoch()) {
-        log("I'm behind, updating history", LogLevel.DEBUG);
+        log("I'm behind, updating history", Cluster.LogLevel.DEBUG);
         // if we're here we missed out 1+ epochs, we must update our history
         int diff = Math.abs(epochSeqNumList.get(0).getCurrentEpoch() - this.epochSeqNumPair.getCurrentEpoch());
         // since epoch updates are sequential we can iterate over the difference diff.
@@ -561,15 +561,15 @@ public class Replica extends Node {
         proposedCoordinatorID = this.id;
         update = this.updateHistory;
 
-        log("I have the latest version", LogLevel.DEBUG);
+        log("I have the latest version", Cluster.LogLevel.DEBUG);
       } else {
         // everything matches, break ties using node id
         proposedCoordinatorID = Math.max(proposedCoordinatorID, this.id);
         proposedCoord = proposedCoordinatorID == this.id ? getSelf() : proposedCoord;
-        log("Tie breaker: " + proposedCoordinatorID, LogLevel.DEBUG);
+        log("Tie breaker: " + proposedCoordinatorID, Cluster.LogLevel.DEBUG);
       }
 
-      log("Updated proposed coordinator: " + proposedCoordinatorID + " message coordinator " + electionMessage.proposedCoordinatorID + " next hop " + nextHop, LogLevel.DEBUG);
+      log("Updated proposed coordinator: " + proposedCoordinatorID + " message coordinator " + electionMessage.proposedCoordinatorID + " next hop " + nextHop, Cluster.LogLevel.DEBUG);
       
       nextHop = sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.activeReplicas), nextHop);
 
@@ -594,24 +594,24 @@ public class Replica extends Node {
     renewHeartbeatTimeout();
 
     if(electionTimeout != null){
-      log("Cancelling election timeout", LogLevel.INFO);
+      log("Cancelling election timeout", Cluster.LogLevel.INFO);
       electionTimeout.cancel();
       setElectionTimeout = false;
     }
 
     if(voteTimeout != null){
-      log("Cancelling vote timeout", LogLevel.INFO);
+      log("Cancelling vote timeout", Cluster.LogLevel.INFO);
       voteTimeout.cancel();
     }
     
     if(pendingMsg.size() > 0){
-      log("Solve pending messages", LogLevel.INFO);
+      log("Solve pending messages", Cluster.LogLevel.INFO);
       // Retry pending messages from current epoch
       for(WriteDataMsg msg : pendingMsg){
         coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
       }
     } else {
-      log("No pending messages", LogLevel.INFO);
+      log("No pending messages", Cluster.LogLevel.INFO);
       coordinator.tell(new FlushMsg(), getSelf());
     }
   
@@ -624,17 +624,17 @@ public class Replica extends Node {
    * @param msg the {@code FlushMsg} received from a replica.
    */
   public void onFlushMessage(FlushMsg msg) {
-    log("Received flush message from replica " + getSender().path().name(), LogLevel.INFO);
+    log("Received flush message from replica " + getSender().path().name(), Cluster.LogLevel.INFO);
 
     if (isCoordinator()) {
       Set<ActorRef> participants = proposedView.get(epochSeqNumPair.currentEpoch);
       flushedReplicas.add(getSender());
-      log("Flushed replicas: " + flushedReplicas.toString(), LogLevel.DEBUG);
-      log("Can propose view: " + (flushedReplicas.size() >= participants.size()), LogLevel.DEBUG);
+      log("Flushed replicas: " + flushedReplicas.toString(), Cluster.LogLevel.DEBUG);
+      log("Can propose view: " + (flushedReplicas.size() >= participants.size()), Cluster.LogLevel.DEBUG);
       if (flushedReplicas.size() >= participants.size()) {
         multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0), participants, coordinator));
         currentRequest = 0;
-        log("View change message sent", LogLevel.INFO);
+        log("View change message sent", Cluster.LogLevel.INFO);
       }
     }
   }
@@ -655,8 +655,8 @@ public class Replica extends Node {
 
     renewHeartbeatTimeout();
 
-    log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
-    log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
+    log( "Participants in the new view: " + currentView.toString(), Cluster.LogLevel.INFO);
+    log( "Coordinator in the new view: " + coordinator.path().name(), Cluster.LogLevel.INFO);
     getContext().become(createReceive());
     
     if (isCoordinator()) {
@@ -701,7 +701,7 @@ public class Replica extends Node {
     nextHop = sendElectionMsg(new ElectionMessage(updateHistory,getSelf(),this.id, msg.activeReplicas),msg.next);
     // set timeout with nextHop+1
     voteTimeout = setTimeout(VOTE_TIMEOUT, new ElectionTimeout(nextHop, msg.activeReplicas));
-    log("Election timeout. Trying with next node: " + nextHop, LogLevel.INFO);
+    log("Election timeout. Trying with next node: " + nextHop, Cluster.LogLevel.INFO);
   }
 
   /**
@@ -711,7 +711,7 @@ public class Replica extends Node {
    * @param msg the {@code RestartElection} received, indicating the need to restart the election.
    */
   public void onRestartElection(RestartElection msg) {
-    log("Restarting election", LogLevel.INFO);
+    log("Restarting election", Cluster.LogLevel.INFO);
     setElectionTimeout = false;
     nextHop = -1;
     multicast(new ElectionRestated());
@@ -725,10 +725,10 @@ public class Replica extends Node {
    * @param msg the {@code ElectionRestated} received, indicating the election has been restarted.
    */
   public void onElectionRestarted(ElectionRestated msg) {
-    log("Election restarted", LogLevel.INFO);
+    log("Election restarted", Cluster.LogLevel.INFO);
     
     if(electionTimeout != null){
-      log("Cancelling election timeout", LogLevel.INFO);
+      log("Cancelling election timeout", Cluster.LogLevel.INFO);
       electionTimeout.cancel();
     }
   }
@@ -804,7 +804,7 @@ public class Replica extends Node {
    * @param msg the {@code ReadHistory} message received.
    */
   public void onReadHistory(ReadHistory msg) {
-    log("History: " + updateHistory.toString(), LogLevel.INFO);
+    log("History: " + updateHistory.toString(), Cluster.LogLevel.INFO);
   }
 
   /**
@@ -838,7 +838,7 @@ public class Replica extends Node {
     if(!setElectionTimeout){
       // Stagger election timeouts pioritizing lower nodes to trigger election first
       int time = ELECTION_TIMEOUT + (id * 750);
-      log("Setting election timeout to trigger in " + time + "ms", LogLevel.INFO);
+      log("Setting election timeout to trigger in " + time + "ms", Cluster.LogLevel.INFO);
       electionTimeout = setTimeout(time, new RestartElection());
       setElectionTimeout = true;
     }

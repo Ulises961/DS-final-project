@@ -509,8 +509,8 @@ public abstract class Node extends AbstractActor {
             currentView.add(b);
         }
 
-        log("Starting with " + sm.group.size() + " peer(s)", LogLevel.INFO);
-        log("Participants: " + currentView.toString(), LogLevel.INFO);
+        log("Starting with " + sm.group.size() + " peer(s)", Cluster.LogLevel.INFO);
+        log("Participants: " + currentView.toString(), Cluster.LogLevel.INFO);
     }
 
     /**
@@ -519,12 +519,12 @@ public abstract class Node extends AbstractActor {
      */
     public void crash() {
         getContext().become(crashed());
-        log("CRASH!!!", LogLevel.ERROR);
+        log("CRASH!!!", Cluster.LogLevel.ERROR);
     }
 
     public Receive crashed() {
         return receiveBuilder()
-                .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (crashed)", LogLevel.DEBUG))
+                .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (crashed)", Cluster.LogLevel.DEBUG))
                 .build();
     }
 
@@ -613,8 +613,8 @@ public abstract class Node extends AbstractActor {
             currentValue = v;
             updateHistory.put(epochSeqNum, v);
             epochSeqNumPair = epochSeqNum;
-            log("update " + epochSeqNumPair.getCurrentEpoch() + ":" + epochSeqNumPair.seqNum + " " + currentValue, LogLevel.INFO);
-            log("Update History " + updateHistory, LogLevel.DEBUG);
+            log("update " + epochSeqNumPair.getCurrentEpoch() + ":" + epochSeqNumPair.seqNum + " " + currentValue, Cluster.LogLevel.INFO);
+            log("Update History " + updateHistory, Cluster.LogLevel.DEBUG);
         }
     }
 
@@ -646,7 +646,7 @@ public abstract class Node extends AbstractActor {
      * @param message The message to log.
      * @param level The {@code LogLevel} indicating the severity of the log message.
      */
-    protected void log(String message, LogLevel level) {
+    protected void log(String message, Cluster.LogLevel level) {
         Cluster.logWithMDC(message, contextMap, logger, level);
     }
 

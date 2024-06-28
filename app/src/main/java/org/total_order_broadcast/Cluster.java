@@ -1,7 +1,5 @@
 package org.total_order_broadcast;
 
-import org.total_order_broadcast.LogLevel;
-
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 
@@ -309,11 +307,17 @@ public class Cluster {
             MDC.clear();
         }
   }
+  /**
+   * Enum representing the log levels.
+   */
+  public enum LogLevel {
+      INFO, WARN, ERROR, DEBUG
+  }
 }
 
-/**
- * Enum representing the log levels.
- */
+
+/*
 enum LogLevel {
   INFO, WARN, ERROR, DEBUG
 }
+ */

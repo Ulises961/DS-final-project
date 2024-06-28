@@ -96,7 +96,7 @@ public class Client extends Node {
             this.participants.add(b);
           }
         }
-        log("Starting with " + sm.group.size() + " peer(s)", LogLevel.DEBUG);
+        log("Starting with " + sm.group.size() + " peer(s)", Cluster.LogLevel.DEBUG);
       }
 
     @Override
@@ -117,7 +117,7 @@ public class Client extends Node {
     }
 
     public void onTimeout(Timeout msg) {
-        log("Server timeout, changing server " + server.path().name(), LogLevel.DEBUG);
+        log("Server timeout, changing server " + server.path().name(), Cluster.LogLevel.DEBUG);
         participants.remove(server);
         assignServer();
         onRequestRead(new RequestRead());
@@ -125,14 +125,14 @@ public class Client extends Node {
 
     public void onRequestRead(RequestRead msg){
         if(server != null){
-            log("read req to " + server.path().name(), LogLevel.INFO);
+            log("read req to " + server.path().name(), Cluster.LogLevel.INFO);
             server.tell(new ReadDataMsg(getSelf()),getSelf());
             readTimeout = setTimeout(READ_TIMEOUT, new Timeout());
         } 
     }
 
     public void onReadResponse(DataMsg res) {
-        log("read done " + res.value, LogLevel.INFO);
+        log("read done " + res.value, Cluster.LogLevel.INFO);
         readTimeout.cancel();
     }
 
@@ -159,7 +159,7 @@ public class Client extends Node {
 
     public void onSetCoordinator(SetCoordinator msg){
         coordinator = getSender();
-        log("Coordinator set to " + coordinator.path().name(), LogLevel.DEBUG);
+        log("Coordinator set to " + coordinator.path().name(), Cluster.LogLevel.DEBUG);
     }
 
     public void onSupervise(Supervise msg){
