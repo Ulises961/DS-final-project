@@ -176,7 +176,7 @@ public class Replica extends Node {
   
   public void onReadMessage(ReadDataMsg msg) { /* Value read from Client */
     msg.sender.tell(new DataMsg(getValue()), getSelf());
-    log("Read from Client: " + getSender().path().name() + " Value returned: " + currentValue, LogLevel.INFO);
+    log("Read from client: " + getSender().path().name() + ". Value returned: " + currentValue, LogLevel.DEBUG);
   }
 
   public void onHeartbeat(Heartbeat msg) {

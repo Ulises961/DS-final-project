@@ -7,7 +7,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.List;
 
 import org.slf4j.LoggerFactory;
 
@@ -20,7 +19,7 @@ public class Client extends Node {
     private ActorRef server = null;
     private HashSet<ActorRef> participants;
     public static int nextReplica = 0;
-    public static int clientNumber = 1;
+    private static int clientNumber = 1;
     private Cancellable readTimeout;
     private Cancellable serverLivenessTimeout;
     private LinkedList<UpdateRequest> updates = new LinkedList<>();
@@ -34,9 +33,21 @@ public class Client extends Node {
         contextMap = new HashMap<>();
         contextMap.put("replicaId", String.valueOf(id));
     }
+    public Client(int clientNumber){
+        super(clientNumber);
+        this.participants = new HashSet<>();
+        this.logger = LoggerFactory.getLogger(Client.class);
+
+        contextMap = new HashMap<>();
+        contextMap.put("replicaId", String.valueOf(id));
+    }
 
     static public Props props() {
         return Props.create(Client.class, Client::new);
+    }
+    
+    public static Props props(int clientId) {
+        return Props.create(Client.class, () -> new Client(clientId));
     }
 
     public static class SetCoordinator {}
@@ -85,7 +96,7 @@ public class Client extends Node {
             this.participants.add(b);
           }
         }
-        log( "starting with " + sm.group.size() + " peer(s)", LogLevel.INFO);
+        log("Starting with " + sm.group.size() + " peer(s)", LogLevel.DEBUG);
       }
 
     @Override
@@ -114,12 +125,14 @@ public class Client extends Node {
 
     public void onRequestRead(RequestRead msg){
         if(server != null){
+            log("read req to " + server.path().name(), LogLevel.INFO);
             server.tell(new ReadDataMsg(getSelf()),getSelf());
             readTimeout = setTimeout(READ_TIMEOUT, new Timeout());
         } 
     }
 
     public void onReadResponse(DataMsg res) {
+        log("read done " + res.value, LogLevel.INFO);
         readTimeout.cancel();
     }
 
@@ -146,7 +159,7 @@ public class Client extends Node {
 
     public void onSetCoordinator(SetCoordinator msg){
         coordinator = getSender();
-        log("Coordinator set to " + coordinator.path().name(), LogLevel.INFO);
+        log("Coordinator set to " + coordinator.path().name(), LogLevel.DEBUG);
     }
 
     public void onSupervise(Supervise msg){

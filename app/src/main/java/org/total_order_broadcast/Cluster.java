@@ -48,7 +48,7 @@ public class Cluster {
       group.add(system.actorOf(Replica.props(i), "replica-" + i));
     }
 
-    ActorRef supervisor = system.actorOf(Client.props(), "supervisor");
+    ActorRef supervisor = system.actorOf(Client.props(-1), "supervisor");
 
     // Send join messages to the coordinator and the nodes to inform them of the
     // whole group
