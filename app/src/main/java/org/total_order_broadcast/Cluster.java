@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
 import org.slf4j.MDC;
 import org.slf4j.Logger;
@@ -27,7 +26,6 @@ import org.total_order_broadcast.Node.*;
  * <pre>
  *   java org.total_order_broadcast.Cluster
  * </pre>
- * </p>
  *
  * <p>This class is the entry point for the application and includes the main method
  * that sets up the environment and starts the interactive user input loop.</p>
@@ -309,11 +307,17 @@ public class Cluster {
             MDC.clear();
         }
   }
+  /**
+   * Enum representing the log levels.
+   */
+  public enum LogLevel {
+      INFO, WARN, ERROR, DEBUG
+  }
 }
 
-/**
- * Enum representing the log levels.
- */
+
+/*
 enum LogLevel {
   INFO, WARN, ERROR, DEBUG
 }
+ */
