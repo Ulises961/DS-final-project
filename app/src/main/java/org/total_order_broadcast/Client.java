@@ -55,8 +55,8 @@ public class Client extends Node {
     public static class Supervise {}
 
     public static class UpdateRequest extends WriteDataMsg {
-        public UpdateRequest(Integer value, ActorRef sender, boolean shouldCrash){
-            super(value, sender, shouldCrash);
+        public UpdateRequest(Integer value, ActorRef sender){
+            super(value, sender);
         }
 
         public String toString() {
@@ -112,7 +112,7 @@ public class Client extends Node {
     public void onSendUpdate(WriteDataMsg update){
         // First check server is alive, 
         // on ping response send update, otherwise choose another server and retry
-        updates.add(new UpdateRequest(update.value, update.sender, update.shouldCrash));
+        updates.add(new UpdateRequest(update.value, update.sender));
         pingServer();
     }
 

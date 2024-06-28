@@ -74,7 +74,7 @@ public abstract class Node extends AbstractActor {
   final static int MAX_DELAY = 500; // max network delay, ms
   final static int READ_TIMEOUT = 500; // timeout to respond to a client, ms
   final static int DECISION_TIMEOUT = 1000; // timeout for the decision, ms
-  final static int ELECTION_TIMEOUT = 4000; // timeout for the election, ms
+  final static int ELECTION_TIMEOUT = 8000; // timeout for the election, ms
 
   protected Logger logger; 
 
@@ -143,7 +143,6 @@ public abstract class Node extends AbstractActor {
     }
   }
 
-  // TODO change this according to the new implementation of ESN, also the paper only says that the nodes share the UPDATED value
   public static class WriteOk implements Serializable {
     public final Integer value;
     public final EpochSeqNum epochSeqNum;
@@ -218,29 +217,26 @@ public abstract class Node extends AbstractActor {
 
   public static class WriteDataMsg implements Serializable {
     public final Integer value;
-    public final boolean shouldCrash;
+    public final boolean shouldFlush;
     ActorRef sender;
 
-    public WriteDataMsg(Integer value, ActorRef sender, boolean shouldCrash) {
+    public WriteDataMsg(Integer value, ActorRef sender, boolean shouldFlush) {
       this.value = value;
       this.sender = sender;
-      this.shouldCrash = shouldCrash;
+      this.shouldFlush = false;
     }
 
     public WriteDataMsg(Integer value, ActorRef sender) {
       this.value = value;
       this.sender = sender;
-      this.shouldCrash = false;
+      this.shouldFlush = false;
     }
+
   }
 
   public static class PendingWriteMsg extends WriteDataMsg {
-    public PendingWriteMsg(Integer value, ActorRef sender, boolean shouldCrash) {
-      super(value, sender, shouldCrash);
-    }
-
-    public PendingWriteMsg(Integer value, ActorRef sender) {
-      super(value, sender);
+    public PendingWriteMsg(Integer value, ActorRef sender, boolean shouldFlush) {
+      super(value, sender, shouldFlush);
     }
   }
 

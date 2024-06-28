@@ -162,6 +162,8 @@ public class Replica extends Node {
       .match(FlushMsg.class, this::onFlushMessage)
       .match(ViewChangeMsg.class, this::onViewChange)
       .match(CrashMsg.class, this::onCrash)
+      .match(ICMPRequest.class, this::onPing)
+
       .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.DEBUG))
       .build();
   }
@@ -250,7 +252,7 @@ public class Replica extends Node {
   /* Value update from Client */
   public void onUpdateMessage(WriteDataMsg msg) {
     // Defer messages during election. New messages make part of the next epoch
-    if(deferringMessages) {
+    if(deferringMessages && !msg.shouldFlush) {
       deferredMsgSet.add(msg);
       log("Deferring message: " + msg.value, LogLevel.INFO);
     } else {
@@ -280,12 +282,6 @@ public class Replica extends Node {
           updateTimeOut.cancel();
         }
         updateTimeOut = setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(epochSeqNumPair));
-      }
-      
-
-      // The crash occurs only to the client's server
-      if(msg.shouldCrash){
-        crash();
       }
     }
   }
@@ -356,7 +352,7 @@ public class Replica extends Node {
     } else if(msg.epochSeqNum.seqNum >= epochSeqNumPair.seqNum){
       log("Message already committed " + msg.value + " seq num " + msg.epochSeqNum, LogLevel.DEBUG);
     } else {
-      log("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, LogLevel.DEBUG);
+      log("Deferring commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, LogLevel.DEBUG);
       
       // Defer commit until the correct sequence number is reached
       unstableWrites.put(msg.epochSeqNum, msg);
@@ -449,19 +445,15 @@ public class Replica extends Node {
       voteTimeout.cancel();
       if (isCoordinator()) {
         log("Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
-        deferringMessages = false;
         Set<ActorRef> activeReplicas = electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch);
         log("New view established " + activeReplicas, LogLevel.INFO);
         updateQuorum(activeReplicas.size());
         this.proposedView.put(epochSeqNumPair.currentEpoch, activeReplicas);
         flushes.put(epochSeqNumPair.currentEpoch, new HashSet<>());
         flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
-
+        deferringMessages = false;
         multicast(new SyncMessage(updateHistory));
         multicast(new Heartbeat());
-      } else {
-        // set timeout in case new coordinator also crashed
-        heartbeatTimeout = setTimeout(HEARTBEAT_TIMEOUT_DURATION, new HeartbeatTimeout());
       }
     } else {
       // Someone else has discovered a crashed coordinator, no need to trigger another election
@@ -544,9 +536,10 @@ public class Replica extends Node {
    */
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
-    deferringMessages = false;
-     
-    renewHeartbeatTimeout();
+    
+    if(!isCoordinator()){
+      renewHeartbeatTimeout();
+    }
 
     if(electionTimeout != null){
       log("Cancelling election timeout", LogLevel.INFO);
@@ -563,7 +556,7 @@ public class Replica extends Node {
       log("Solve pending messages", LogLevel.INFO);
       // Retry pending messages from current epoch
       for(WriteDataMsg msg : pendingMsg){
-        coordinator.tell(new PendingWriteMsg(msg.value, msg.sender), getSelf());
+        coordinator.tell(new PendingWriteMsg(msg.value, msg.sender, true), getSelf());
       }
     } else {
       log("No pending messages", LogLevel.INFO);
@@ -587,8 +580,12 @@ public class Replica extends Node {
       log("Flushed replicas: " + flushedReplicas.toString(), LogLevel.DEBUG);
       log("Can propose view: " + (flushedReplicas.size() >= participants.size()), LogLevel.DEBUG);
       if (flushedReplicas.size() >= participants.size()) {
-        multicast(new ViewChangeMsg(new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0), participants, coordinator));
+        epochSeqNumPair = new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0);
+        currentView.clear();
+        currentView.addAll(participants);
+        multicastExcept(new ViewChangeMsg(epochSeqNumPair, participants, coordinator), getSelf());
         currentRequest = 0;
+        supervisor.tell(new Client.SetCoordinator(), getSelf());
         log("View change message sent", LogLevel.INFO);
       }
     }
@@ -603,19 +600,20 @@ public class Replica extends Node {
   public void onViewChange(ViewChangeMsg msg) {
     currentView.clear();
     epochSeqNumPair = msg.esn;
+    currentView.addAll(msg.proposedView);
 
-    for(ActorRef participant : msg.proposedView){
-      currentView.add(participant);
+    if(!isCoordinator()){
+      renewHeartbeatTimeout();
     }
-
-    renewHeartbeatTimeout();
 
     log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
     log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
     getContext().become(createReceive());
     
-    if (isCoordinator()) {
-      supervisor.tell(new Client.SetCoordinator(), getSelf());
+    deferringMessages = false;
+
+    for(WriteDataMsg writeDataMsg : deferredMsgSet){
+      onUpdateMessage(writeDataMsg);
     }
   }
 

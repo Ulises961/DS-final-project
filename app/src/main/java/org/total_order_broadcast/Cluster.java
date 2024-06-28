@@ -182,8 +182,9 @@ public class Cluster {
             clientId = readInput(in, clientNames);
             if (clientId == -1) break;
             client = clients.get(clientId);
-            boolean shouldCrash = true;
-            client.tell(new WriteDataMsg(updateValue++, client, shouldCrash), client);
+            client.tell(new WriteDataMsg(updateValue++, client), client);
+            Node.delay(200);
+            client.tell(new CrashMsg(), client);
             break;
           case 7:
             //Coordinator crash in middle of updates (before request is sent to replicas)
