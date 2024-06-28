@@ -478,13 +478,13 @@ public class Replica extends Node {
    * Handles the receipt of an election message within the cluster.
    * This method processes the election message to update the coordinator,
    * manage the election state, and ensure the cluster remains synchronized.
-   *
    * @param electionMessage the {@code ElectionMessage} received, containing information
    *                        about the proposed coordinator, active replicas, and update history.
    */
   public void onElectionMessageReceipt(ElectionMessage electionMessage){
 
-    log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " + getSender().path().name(), Cluster.LogLevel.INFO);
+    log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " +
+            getSender().path().name(), Cluster.LogLevel.INFO);
 
     // send ack to whoever sent the message
     if (hasReceivedElectionMessage && !hasBeenUpdated(electionMessage)){
@@ -500,7 +500,8 @@ public class Replica extends Node {
         updateQuorum(activeReplicas.size());
         this.proposedView.put(epochSeqNumPair.currentEpoch, activeReplicas);
         flushes.put(epochSeqNumPair.currentEpoch, new HashSet<>());
-        flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
+        flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ?
+                this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
 
         multicast(new SyncMessage(updateHistory));
         multicast(new Heartbeat());

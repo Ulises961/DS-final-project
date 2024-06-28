@@ -26,7 +26,6 @@ import org.total_order_broadcast.Node.*;
  * <pre>
  *   java org.total_order_broadcast.Cluster
  * </pre>
- * </p>
  *
  * <p>This class is the entry point for the application and includes the main method
  * that sets up the environment and starts the interactive user input loop.</p>
