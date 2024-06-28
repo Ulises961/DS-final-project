@@ -66,10 +66,10 @@ public abstract class Node extends AbstractActor {
   protected  Map<Integer, Set<ActorRef>> flushes;
 
   // Hearbeat
-  protected final int HEARTBEAT_TIMEOUT_DURATION = 6000;
+  protected final int HEARTBEAT_TIMEOUT_DURATION = 4000;
   protected final int HEARTBEAT_INTERVAL = 2000;
   protected final int VOTE_TIMEOUT = 5000;
-  final static int N_PARTICIPANTS = 3;
+  final static int N_PARTICIPANTS = 5;
   final static int MAX_DELAY = 500; // max network delay, ms
   final static int READ_TIMEOUT = 500; // timeout to respond to a client, ms
   final static int DECISION_TIMEOUT = 5000; // timeout for the decision, ms
@@ -307,7 +307,7 @@ public abstract class Node extends AbstractActor {
 
   public Receive crashed() {
     return receiveBuilder()
-      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (crashed)", LogLevel.INFO))
+      .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (crashed)", LogLevel.DEBUG))
       .build();
   }
 

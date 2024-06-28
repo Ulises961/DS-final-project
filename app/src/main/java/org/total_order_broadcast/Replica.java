@@ -406,6 +406,8 @@ public class Replica extends Node {
         updateQuorum(activeReplicas.size());
         this.proposedView.put(epochSeqNumPair.currentEpoch, activeReplicas);
         flushes.put(epochSeqNumPair.currentEpoch, new HashSet<>());
+        flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
+
         multicast(new SyncMessage(updateHistory));
         multicast(new Heartbeat());
       } else {
@@ -484,9 +486,7 @@ public class Replica extends Node {
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
     deferringMessages = false;
-    
-    flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ? this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
-      
+          
     if(electionTimeout != null){
       log("Cancelling election timeout", LogLevel.INFO);
       electionTimeout.cancel();
