@@ -189,6 +189,11 @@ public class Client extends Node {
         readTimeout.cancel();
     }
 
+    /**
+     * Send an update request only if the server responds to the ICMP request
+     * 
+     * @param msg The ICMP response message
+     */
     public void onICMPResponse(ICMPResponse msg){
         checkingServer = false;
         serverLivenessTimeout.cancel();
@@ -203,13 +208,22 @@ public class Client extends Node {
         }
     }
 
+    /**
+     * If the server does not respond to the ICMP request, chooses another server
+     * @param msg The ICMP timeout message
+     */
     public void ICMPTimeout(ICMPTimeout msg){
         checkingServer = false;
         participants.remove(server);
         assignServer();
         pingServer();
     }
-
+    
+    /**
+     * Utility function that informs the supervisor 
+     * about a new coordinator message after an election.
+     * @param msg Empty message, only sender (the new coordinator) matters
+     */
     public void onSetCoordinator(SetCoordinator msg){
         coordinator = getSender();
         log("Coordinator set to " + coordinator.path().name(), Cluster.LogLevel.DEBUG);
@@ -235,12 +249,19 @@ public class Client extends Node {
         }
     }
 
+    /**
+     * Utility function that handles a read history message from the cluster menu.
+     * @param msg
+     */
     public void onReadHistory(ReadHistory msg){
         if(coordinator != null) {
             coordinator.tell(msg,getSelf());
         }
     }
-
+    
+    /**
+     * Sends an ICMP request to the server to check its liveness.
+     */
     private void pingServer(){
         server.tell(new ICMPRequest(),getSelf());
         if(!checkingServer){
