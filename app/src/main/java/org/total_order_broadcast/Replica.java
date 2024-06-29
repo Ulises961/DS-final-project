@@ -372,8 +372,6 @@ public class Replica extends Node {
     } else {
       log("Defering commit of value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum + " current epoch seqNum: " + epochSeqNumPair.seqNum, Cluster.LogLevel.DEBUG);
       
-      // Defer commit until the correct sequence number is reached
-      unstableWrites.put(msg.epochSeqNum, msg);
     } 
 
     // Remove the message from the pending list
