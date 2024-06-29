@@ -1,21 +1,25 @@
 package org.total_order_broadcast;
 
-import akka.actor.ActorRef;
-import akka.actor.ActorSystem;
-
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
 
-import org.slf4j.MDC;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.total_order_broadcast.Client.*;
-import org.total_order_broadcast.Node.*;
+import org.slf4j.MDC;
+import org.total_order_broadcast.Client.RequestRead;
+import org.total_order_broadcast.Client.Supervise;
+import org.total_order_broadcast.Node.CrashCoord;
+import org.total_order_broadcast.Node.CrashMsg;
+import org.total_order_broadcast.Node.JoinGroupMsg;
+import org.total_order_broadcast.Node.ReadHistory;
+import org.total_order_broadcast.Node.WriteDataMsg;
+
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
 
 /**
  * The {@code Cluster} class is the main class responsible for setting up and managing
