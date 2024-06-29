@@ -483,24 +483,30 @@ public class Replica extends Node {
     log("Received proposed coordinator: " + electionMessage.proposedCoordinatorID + " from sender " +
             getSender().path().name(), Cluster.LogLevel.INFO);
 
-    // send ack to whoever sent the message
+    // The latest history has been shared with all the replicas
+    // the node that proposed the latest history is the coordinator
+    // the election has made at least whole round. End the election 
     if (hasReceivedElectionMessage && !hasBeenUpdated(electionMessage)){
-      // END ELECTION
-      updateCoordinator(proposedCoord);
+      updateCoordinator(electionMessage.proposedCoordinator);
       cleanUp();
       voteTimeout.cancel();
       
       if (isCoordinator()) {
         log("Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
+        
+        // Replicas that participated in the election are active and will be part of the new view
         Set<ActorRef> activeReplicas = electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch);
         log("New view established " + activeReplicas, LogLevel.INFO);
         updateQuorum(activeReplicas.size());
         this.proposedView.put(epochSeqNumPair.currentEpoch, activeReplicas);
-        flushes.put(epochSeqNumPair.currentEpoch, new HashSet<>());
-        flushedReplicas = this.flushes.get(this.epochSeqNumPair.currentEpoch) == null ?
-                this.flushes.get(this.epochSeqNumPair.currentEpoch) : new HashSet<>();
+
+        // All replicas in the proposed view must flush before changing to the new one 
+        flushedReplicas = new HashSet<>();
+        flushes.put(epochSeqNumPair.currentEpoch, flushedReplicas);
 
         multicast(new SyncMessage(updateHistory));
+
+        // The new coordinator starts operating. All nodes know the new coordinator
         multicast(new Heartbeat());
       }
     } else {
@@ -513,6 +519,8 @@ public class Replica extends Node {
         createElectionTimeout();
       }
 
+      // A replica has received an election message, it must defer 
+      // messages until the new view is established
       deferringMessages = true;
       hasReceivedElectionMessage = true;
       
@@ -520,22 +528,27 @@ public class Replica extends Node {
       
       getSender().tell(new ElectionAck(), getSelf());
       
+      // Add itself to the active replicas set for the current election 
       electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch).add(getSelf());
 
-      // view update content
+      // View update content
       proposedCoord = electionMessage.proposedCoordinator;
       proposedCoordinatorID = electionMessage.proposedCoordinatorID;
       updateCoordinator(proposedCoord);
 
+      // All updates are contained in epochs, we must only check if all epochs are present
       List<EpochSeqNum> epochSeqNumList = new LinkedList<>(electionMessage.updateHistory.keySet());
       
       Map<EpochSeqNum, Integer> update = electionMessage.updateHistory;
-      // sorting epochs-seqNums in decreasing order;
+      
+      // Sort epochs-seqNums in decreasing order;
       epochSeqNumList.sort((o1, o2) -> o1.currentEpoch < o2.currentEpoch ? 1 : -1);
+      
+      // If the replica missed out 1+ epochs, update its history
       if (epochSeqNumList.get(0).getCurrentEpoch() > this.epochSeqNumPair.getCurrentEpoch()) {
         log("I'm behind, updating history", Cluster.LogLevel.DEBUG);
-        // if we're here we missed out 1+ epochs, we must update our history
         int diff = Math.abs(epochSeqNumList.get(0).getCurrentEpoch() - this.epochSeqNumPair.getCurrentEpoch());
+        
         // since epoch updates are sequential we can iterate over the difference diff.
         int pos = 0;
         while (pos < diff) {
@@ -548,18 +561,20 @@ public class Replica extends Node {
           pos++;
         }
 
-        // update self, not the message.
+        // Update self, not the message. The message already has the coordinator with most knowledge 
         updateCoordinator(electionMessage.proposedCoordinator);
+      
+      // The replica has the latest version so far, update the message and forward it.
       } else if (epochSeqNumList.get(0).getCurrentEpoch() < epochSeqNumList.get(0).getCurrentEpoch()) {
-        // we have the latest version so far, we must update the message and forward it.
         proposedCoord = getSelf();
         proposedCoordinatorID = this.id;
         update = this.updateHistory;
         log("history received epoch" + epochSeqNumList.get(0).getCurrentEpoch(), Cluster.LogLevel.DEBUG);
         log("current history epoch" + epochSeqNumList.get(0).getCurrentEpoch(), Cluster.LogLevel.DEBUG);
         log("I have the latest version", Cluster.LogLevel.DEBUG);
+      
+      // Everything matches, break ties using node id
       } else {
-        // everything matches, break ties using node id
         proposedCoordinatorID = Math.max(proposedCoordinatorID, this.id);
         proposedCoord = proposedCoordinatorID == this.id ? getSelf() : proposedCoord;
         log("Tie breaker: " + proposedCoordinatorID, Cluster.LogLevel.DEBUG);
@@ -569,6 +584,7 @@ public class Replica extends Node {
       
       nextHop = sendElectionMsg(new ElectionMessage(update, proposedCoord, proposedCoordinatorID, electionMessage.activeReplicas), nextHop);
 
+      // Renew the vote timeout so not to trigger it unecessarily further down the election
       if(voteTimeout != null){
         voteTimeout.cancel();
       }
@@ -586,24 +602,27 @@ public class Replica extends Node {
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
     
+    // Assume this message as a new heartbeat
     if(!isCoordinator()){
       renewHeartbeatTimeout();
     }
 
+    // The new coordinator is elected
     if(electionTimeout != null){
       log("Cancelling election timeout", Cluster.LogLevel.INFO);
       electionTimeout.cancel();
       setElectionTimeout = false;
     }
 
+    // All votes have been performed
     if(voteTimeout != null){
       log("Cancelling vote timeout", Cluster.LogLevel.INFO);
       voteTimeout.cancel();
     }
     
+    // Pending messages are shared before the new view is established
     if(pendingMsg.size() > 0){
       log("Solve pending messages", Cluster.LogLevel.INFO);
-      // Retry pending messages from current epoch
       for(WriteDataMsg msg : pendingMsg){
         coordinator.tell(new PendingWriteMsg(msg.value, msg.sender, true), getSelf());
       }
@@ -629,16 +648,22 @@ public class Replica extends Node {
       log("Flushed replicas: " + flushedReplicas.toString(), Cluster.LogLevel.DEBUG);
       log("Can propose view: " + (flushedReplicas.size() >= participants.size()), Cluster.LogLevel.DEBUG);
       
-      // Set up a timeout in case the new view can never be established
+      // Set up a last resort timeout in case the new view can never be established
       createElectionTimeout();
 
       if (flushedReplicas.size() >= participants.size()) {
         
         epochSeqNumPair = new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0);
+        
+        // Restart the count of proposed updates in the new epoch
         currentRequest = 0;
+        
+        // Share this information with the supervisor to manage the coordinator from the cluster menu
         supervisor.tell(new Client.SetCoordinator(), getSelf());
+        
         // Tell the coordinator to change the view first
         getSelf().tell(new ViewChangeMsg(epochSeqNumPair, participants, getSelf()), getSelf());
+        
         // Then tell the rest of the replicas
         multicastExcept(new ViewChangeMsg(epochSeqNumPair, participants, coordinator), getSelf());
     
@@ -658,11 +683,17 @@ public class Replica extends Node {
    * @param msg the {@code ViewChangeMsg} received, containing the new epoch sequence number and proposed view.
    */
   public void onViewChange(ViewChangeMsg msg) {
+    // Set up the new view
     currentView.clear();
-    epochSeqNumPair = msg.esn;
     currentView.addAll(msg.proposedView);
+    // Change epoch and sequence number
+    epochSeqNumPair = msg.esn;
+    // Start receiving messages again
     deferringMessages = false;
+    // Reset the next hop for a possible new election
     nextHop = -1;
+
+    // Replicas assume this message as a new heartbeat
     if(!isCoordinator()){
       renewHeartbeatTimeout();
     }
@@ -670,8 +701,8 @@ public class Replica extends Node {
     log( "Participants in the new view: " + currentView.toString(), LogLevel.INFO);
     log( "Coordinator in the new view: " + coordinator.path().name(), LogLevel.INFO);
     getContext().become(createReceive());
-    
 
+    // Messages received during the election are now processed as part of the new epoch
     for(WriteDataMsg writeDataMsg : deferredMsgSet){
       onUpdateMessage(writeDataMsg);
     }
