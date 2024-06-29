@@ -47,10 +47,7 @@ public class Replica extends Node {
   
   // Replica requests that have not been yet put to vote
   private List<WriteDataMsg> pendingMsg;
-  
-  // Unordered writes remain pending until the sequence is correct
-  private Map<EpochSeqNum, WriteOk> unstableWrites;
-  
+    
   // Coordinator keeps track of pending requests associated to a Replica
   private Map<EpochSeqNum, ActorRef> pendingRequests;
   
@@ -67,6 +64,7 @@ public class Replica extends Node {
 
   // Flushed replicas for the current epoch
   private Set<ActorRef> flushedReplicas;
+
   // Election timeout
   private boolean setElectionTimeout;
 
@@ -75,7 +73,6 @@ public class Replica extends Node {
     receivedAcks = new HashMap<>();
     this.pendingRequests = new HashMap<>();
     this.pendingMsg = new LinkedList<>();
-    this.unstableWrites = new HashMap<>();
     logger = LoggerFactory.getLogger(Replica.class);
     requestHasQuorum = new HashMap<>();
     contextMap = new HashMap<>();
