@@ -3,53 +3,123 @@
  */
 package org.total_order_broadcast;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
+
+import org.slf4j.LoggerFactory;
 
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import akka.actor.Props;
 
+/**
+ * Represents a client node in the distributed system.
+ * Manages interactions with a set of participants, including sending updates,
+ * reading data, and handling server assignments.
+ */
 public class Client extends Node {
 
     private ActorRef server = null;
     private HashSet<ActorRef> participants;
     public static int nextReplica = 0;
-    public static int clientNumber = N_PARTICIPANTS + 1;
+    private static int clientNumber = 1;
     private Cancellable readTimeout;
     private Cancellable serverLivenessTimeout;
     private LinkedList<UpdateRequest> updates = new LinkedList<>();
     private boolean checkingServer = false;
 
+    /**
+     * Constructs a new client instance with an incremented client number.
+     */
     public Client(){
         super(clientNumber++);
         this.participants = new HashSet<>();
+        this.logger = LoggerFactory.getLogger(Client.class);
+
+        contextMap = new HashMap<>();
+        contextMap.put("replicaId", String.valueOf(id));
     }
+
+    /**
+     * Constructs a new client instance with a specific client number.
+     *
+     * @param clientNumber The client number to assign.
+     */
+    public Client(int clientNumber){
+        super(clientNumber);
+        this.participants = new HashSet<>();
+        this.logger = LoggerFactory.getLogger(Client.class);
+
+        contextMap = new HashMap<>();
+        contextMap.put("replicaId", String.valueOf(id));
+    }
+
 
     static public Props props() {
         return Props.create(Client.class, Client::new);
     }
+    
+    public static Props props(int clientId) {
+        return Props.create(Client.class, () -> new Client(clientId));
+    }
 
+    public static class SetCoordinator {}
+
+
+    public static class Supervise {}
+
+    /**
+     * Inner class representing an update request message for the client.
+     */
     public static class UpdateRequest extends WriteDataMsg {
-        public UpdateRequest(Integer value, ActorRef sender, boolean shouldCrash){
-            super(value, sender, shouldCrash);
+        public UpdateRequest(Integer value, ActorRef sender){
+            super(value, sender);
+        }
+
+        public String toString() {
+            return "UpdateRequest(" + value + ")";
         }
     }
 
-    public void onStartMessage(JoinGroupMsg msg) {
-        setGroup(msg);
-        this.coordinator = msg.coordinator;
-        assignServer();
+    /**
+     * Inner class representing a request to read data from the server.
+     */
+    public static class RequestRead {}
+
+      @Override
+    public Receive createReceive() {
+        return receiveBuilder()
+            .match(JoinGroupMsg.class,this::onStartMessage)
+            .match(WriteDataMsg.class,this::onSendUpdate)
+            .match(DataMsg.class, this::onReadResponse)
+            .match(RequestRead.class, this::onRequestRead)
+            .match(ICMPResponse.class, this::onICMPResponse)
+            .match(ICMPTimeout.class, this::ICMPTimeout)
+            .match(Timeout.class, this::onTimeout)
+            .match(Supervise.class, this::onSupervise)
+            .build();
     }
 
-    public void onSendUpdate(WriteDataMsg update){
-        // First check server is alive, 
-        // on ping response send update, otherwise choose another server and retry
-        updates.add(new UpdateRequest(update.value,update.sender, update.shouldCrash));
-        pingServer();
+    /**
+     * Initializes the client actor's behavior for supervision messages.
+     *
+     * @return Receive object defining the supervision message handling behavior.
+     */
+    public Receive supervise() {
+        return receiveBuilder()
+            .match(SetCoordinator.class, this::onSetCoordinator)
+            .match(CrashCoord.class, this::onCrashCoord)
+            .match(ReadHistory.class, this::onReadHistory)
+            .build();
     }
 
+    /**
+     * Sets the group of participants and initializes the client's interactions.
+     *
+     * @param sm The {@code JoinGroupMsg} containing the group and coordinator information.
+     */
     @Override
     public void setGroup(JoinGroupMsg sm) {
         for (ActorRef b : sm.group) {
@@ -58,7 +128,7 @@ public class Client extends Node {
             this.participants.add(b);
           }
         }
-        print("starting with " + sm.group.size() + " peer(s)");
+        log("Starting with " + sm.group.size() + " peer(s)", Cluster.LogLevel.DEBUG);
       }
 
     @Override
@@ -66,9 +136,144 @@ public class Client extends Node {
         // client doesn't crash
     }
 
-    public static class RequestRead{}
+    /**
+     * Handles the start message for the client, setting the group and assigning a server.
+     *
+     * @param msg The {@code JoinGroupMsg} containing group and coordinator information.
+     */
+    public void onStartMessage(JoinGroupMsg msg) {
+        setGroup(msg);
+        assignServer();
+    }
 
-    public void assignServer(){
+    /**
+     * Handles sending an update message to the server.
+     *
+     * @param update The {@code WriteDataMsg} containing the update information.
+     */
+    public void onSendUpdate(WriteDataMsg update){
+        // First check server is alive, 
+        // on ping response send update, otherwise choose another server and retry
+        updates.add(new UpdateRequest(update.value, update.sender));
+        pingServer();
+    }
+
+    /**
+     * Handles a timeout message, indicating server unresponsiveness.
+     *
+     * @param msg The Timeout message.
+     */
+    public void onTimeout(Timeout msg) {
+        log("Server timeout, changing server " + server.path().name(), Cluster.LogLevel.DEBUG);
+        participants.remove(server);
+        assignServer();
+        onRequestRead(new RequestRead());
+    }
+
+    /**
+     * Handles a request to read data from the server.
+     *
+     * @param msg The RequestRead message.
+     */
+    public void onRequestRead(RequestRead msg){
+        if(server != null){
+            log("read req to " + server.path().name(), Cluster.LogLevel.INFO);
+            server.tell(new ReadDataMsg(getSelf()),getSelf());
+            readTimeout = setTimeout(READ_TIMEOUT, new Timeout());
+        } 
+    }
+
+
+    public void onReadResponse(DataMsg res) {
+        log("read done " + res.value, Cluster.LogLevel.INFO);
+        readTimeout.cancel();
+    }
+
+    /**
+     * Send an update request only if the server responds to the ICMP request
+     * 
+     * @param msg The ICMP response message
+     */
+    public void onICMPResponse(ICMPResponse msg){
+        checkingServer = false;
+        serverLivenessTimeout.cancel();
+        if(server != null){
+            UpdateRequest update = updates.poll();
+            if(update != null) {
+                server.tell(update,getSelf());
+            }
+            if(!updates.isEmpty()){
+                pingServer();
+            }
+        }
+    }
+
+    /**
+     * If the server does not respond to the ICMP request, chooses another server
+     * @param msg The ICMP timeout message
+     */
+    public void ICMPTimeout(ICMPTimeout msg){
+        checkingServer = false;
+        participants.remove(server);
+        assignServer();
+        pingServer();
+    }
+    
+    /**
+     * Utility function that informs the supervisor 
+     * about a new coordinator message after an election.
+     * @param msg Empty message, only sender (the new coordinator) matters
+     */
+    public void onSetCoordinator(SetCoordinator msg){
+        coordinator = getSender();
+        log("Coordinator set to " + coordinator.path().name(), Cluster.LogLevel.DEBUG);
+    }
+
+    /**
+     * Handles supervision message to switch to supervision behavior.
+     *
+     * @param msg The {@code Supervise} message.
+     */
+    public void onSupervise(Supervise msg){
+        getContext().become(supervise());
+    }
+
+    /**
+     * Handles crashing the coordinator.
+     *
+     * @param msg The {@code CrashCoord} message.
+     */
+    public void onCrashCoord(CrashCoord msg){
+        if(coordinator != null) {
+            coordinator.tell(new CrashMsg(),getSelf());
+        }
+    }
+
+    /**
+     * Utility function that handles a read history message from the cluster menu.
+     * @param msg
+     */
+    public void onReadHistory(ReadHistory msg){
+        if(coordinator != null) {
+            coordinator.tell(msg,getSelf());
+        }
+    }
+    
+    /**
+     * Sends an ICMP request to the server to check its liveness.
+     */
+    private void pingServer(){
+        server.tell(new ICMPRequest(),getSelf());
+        if(!checkingServer){
+            serverLivenessTimeout = setTimeout(DECISION_TIMEOUT, new ICMPTimeout());
+            checkingServer = true;
+        }
+    }
+
+    /**
+     * Assigns a server from the list of participants.
+     */
+    private void assignServer(){
         Iterator<ActorRef> iterator = participants.iterator();
         if (iterator.hasNext()) {
             int randomIndex = (int) (Math.random() * participants.size());
@@ -78,61 +283,4 @@ public class Client extends Node {
             server = iterator.next();
         }
     }
-
-    public void onTimeout(Timeout msg) {
-        participants.remove(server);
-        assignServer();
-    }
-
-    public void onRequestRead(RequestRead msg){
-        if(server != null){
-            server.tell(new ReadDataMsg(getSelf()),getSelf());
-            readTimeout = setTimeout(DECISION_TIMEOUT, new Timeout());
-        }
-    }
-
-    public void onReadResponse(DataMsg res) {
-        System.out.println("Client received:"+res.value);
-        readTimeout.cancel();
-    }
-
-    public void onPong(ICMPResponse msg){
-        checkingServer = false;
-        serverLivenessTimeout.cancel();
-        if(server != null){
-            server.tell(updates.poll(),getSelf());
-            if(!updates.isEmpty()){
-                pingServer();
-            }
-        }
-    }
-
-    public void ICMPTimeout(ICMPTimeout msg){
-        checkingServer = false;
-        participants.remove(server);
-        assignServer();
-        pingServer();
-    }
-
-    private void pingServer(){
-        server.tell(new ICMPRequest(),getSelf());
-        if(!checkingServer){
-            serverLivenessTimeout = setTimeout(DECISION_TIMEOUT, new ICMPTimeout());
-            checkingServer = true;
-        }
-    }
-
-    @Override
-    public Receive createReceive() {
-        return receiveBuilder()
-                .match(JoinGroupMsg.class,this::onStartMessage)
-                .match(WriteDataMsg.class,this::onSendUpdate)
-                .match(DataMsg.class, this::onReadResponse)
-                .match(RequestRead.class, this::onRequestRead)
-                .match(Timeout.class, this::onTimeout)
-                .match(ICMPResponse.class, this::onPong)
-                .match(ICMPTimeout.class, this::ICMPTimeout)
-                .build();
-    }
-
 }

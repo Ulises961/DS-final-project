@@ -1,24 +1,63 @@
 package org.total_order_broadcast;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Scanner;
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.total_order_broadcast.Client.RequestRead;
+import org.total_order_broadcast.Client.Supervise;
+import org.total_order_broadcast.Node.CrashCoord;
+import org.total_order_broadcast.Node.CrashMsg;
+import org.total_order_broadcast.Node.JoinGroupMsg;
+import org.total_order_broadcast.Node.ReadHistory;
+import org.total_order_broadcast.Node.WriteDataMsg;
+
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Scanner;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
-
-import org.total_order_broadcast.Client.RequestRead;
-import org.total_order_broadcast.Node.CrashMsg;
-import org.total_order_broadcast.Node.JoinGroupMsg;
-import org.total_order_broadcast.Node.WriteDataMsg;
-
+/**
+ * The {@code Cluster} class is the main class responsible for setting up and managing
+ * a virtual synchrony cluster of nodes using Akka actors. It initializes the actor system,
+ * creates nodes and clients, and handles user input to perform actions within the cluster.
+ * It also includes logging functionality with MDC (Mapped Diagnostic Context) for enhanced log management.
+ *
+ * <p>Usage:
+ * <pre>
+ *   java org.total_order_broadcast.Cluster
+ * </pre>
+ *
+ * <p>This class is the entry point for the application and includes the main method
+ * that sets up the environment and starts the interactive user input loop.</p>
+ *
+ * @see akka.actor.ActorSystem
+ * @see akka.actor.ActorRef
+ * @see org.total_order_broadcast.Node
+ * @see org.total_order_broadcast.Client
+ * @see org.slf4j.MDC
+ * @see org.slf4j.Logger
+ * @see org.slf4j.LoggerFactory
+ */
 public class Cluster {
+  private static Map<String, String> contextMap =  new HashMap<>();
 
+  private static final Logger logger = LoggerFactory.getLogger(Cluster.class);
+
+  /**
+   * The main method that sets up the actor system, creates the nodes and clients,
+   * and starts the interactive user input loop to perform actions within the cluster.
+   *
+   * @param args Command line arguments (not used).
+   */
   public static void main(String[] args) {
 
     Scanner in = new Scanner(System.in);
+    contextMap.put("replicaId", String.valueOf("system"));
 
     // Create the actor system
     final ActorSystem system = ActorSystem.create("vssystem");
@@ -37,9 +76,11 @@ public class Cluster {
       group.add(system.actorOf(Replica.props(i), "replica-" + i));
     }
 
+    ActorRef supervisor = system.actorOf(Client.props(-1), "supervisor");
+
     // Send join messages to the coordinator and the nodes to inform them of the
     // whole group
-    JoinGroupMsg start = new JoinGroupMsg(group, coordinator);
+    JoinGroupMsg start = new JoinGroupMsg(group, coordinator, supervisor);
 
     for (ActorRef peer : group) {
       peer.tell(start, ActorRef.noSender());
@@ -47,11 +88,13 @@ public class Cluster {
 
     ActorRef client_1 = system.actorOf(Client.props(), "client_1");
     ActorRef client_2 = system.actorOf(Client.props(), "client_2");
+    
+    supervisor.tell(new Supervise(), ActorRef.noSender());
+
     clients.add(client_1);
     clients.add(client_2);
 
     client_1.tell(start, ActorRef.noSender());
-
     client_2.tell(start, ActorRef.noSender());
 
     try {
@@ -60,7 +103,7 @@ public class Cluster {
       e.printStackTrace();
     }
 
-    inputContinue(in, clients, group);
+    inputContinue(in, clients, group, supervisor);
 
     // system shutdown
     system.terminate();
@@ -68,28 +111,37 @@ public class Cluster {
 
   }
 
-  public static void inputContinue(Scanner in, List<ActorRef> clients, List<ActorRef> group) {
+  public static void inputContinue(Scanner in, List<ActorRef> clients, List<ActorRef> group, ActorRef supervisor) {
     boolean exit = false;
     int updateValue = 1;
     int clientId = 0;
     int replicaId = 0;
     int input = 0;
     ActorRef replica;
+    List<ActorRef> replicas = new ArrayList<>();
     ActorRef client;
-    String[] clientNames = clients.stream().map(c -> c.path().name()).toArray(String[]::new);
-    String[] replicaNames = group.stream().map(node -> node.path().name()).toArray(String[]::new);
+    String[] clientNames = clients.stream().map(c -> c.path().name()).sorted().toArray(String[]::new);
+    
+    // Sort replicas by name
+    group = group.stream().sorted((r1,r2)-> r1.path().name().compareTo(r2.path().name())).toList();
+    String[] replicaNames = group.stream().map(r -> r.path().name()).toArray(String[]::new);
 
     while (!exit) {
 
       try {
         String[] actions = {
             "Exit",
-            "Update",
-            "Read",
-            "Crash",
+            "Update: choose a client to trigger the update",
+            "Read: choose a client to read the latest value",
+            "Concurrent updates",
+            "Crash: choose a replica to crash",
             "Crash coordinator",
-            "Update and crash",
-            "Concurrent updates"
+            "Update and crash: choose a client to trigger the update and crash its replica",
+            "Coordinator crash in middle of updates (before acks are received)",
+            "Coordinator crash in middle of updates (before request is sent to replicas)",
+            "Crash replica in election coordinator",
+            "Crash two replicas in election coordinator",
+            "Read history",
           };
 
         input = readInput(in, actions);
@@ -115,33 +167,71 @@ public class Cluster {
             client.tell(new RequestRead(), client);
             break;
           case 3:
+            // Concurrent updates
+            for(ActorRef c : clients){
+              c.tell(new WriteDataMsg(updateValue++, c), c);
+            }
+            break;
+          case 4:
             // Crash replica
             replicaId = readInput(in, replicaNames);
             if (replicaId == -1) break;
             replica = group.get(replicaId);
+            logWithMDC("Crashing replica: " + replica.path().name(), contextMap, logger, LogLevel.INFO);
             replica.tell(new CrashMsg(), replica);
             break;
-          case 4:
-            // Crash coordinator
-            group.get(0).tell(new CrashMsg(), group.get(0));
-            break;
           case 5:
-            // Update and crash
+            // Crash coordinator
+            supervisor.tell(new CrashCoord(), supervisor);
+            break;
+          case 6:
+            // Update and crash replica
             clientId = readInput(in, clientNames);
             if (clientId == -1) break;
             client = clients.get(clientId);
-            boolean shouldCrash = true;
-            client.tell(new WriteDataMsg(updateValue++, client, shouldCrash), client);
-          case 6:
-            // Concurrent updates
-            int clientId1 = readInput(in, clientNames);
-            String[] filteredClientNames = Stream.of(clientNames).filter(name -> !name.equals(clientNames[clientId1])).toArray(String[]::new);
-            int clientId2 = readInput(in, filteredClientNames);
-            if (clientId1 == -1 || clientId2 == -1) break;
-            client = clients.get(clientId1);
-            ActorRef client2 = clients.get(clientId2);
             client.tell(new WriteDataMsg(updateValue++, client), client);
-            client2.tell(new WriteDataMsg(updateValue++, client2), client2);
+            Node.delay(200);
+            client.tell(new CrashMsg(), client);
+            break;
+          case 7:
+            //Coordinator crash in middle of updates (before request is sent to replicas)
+            for(ActorRef c : clients){
+              c.tell(new WriteDataMsg(updateValue++, c), c);
+            }
+            supervisor.tell(new CrashCoord(), supervisor);
+            break;
+          case 8:
+            //Coordinator crash in middle of updates (before acks are received)
+            for(ActorRef c : clients){
+              c.tell(new WriteDataMsg(updateValue++, c), c);
+            }
+            Node.delay(200);
+            supervisor.tell(new CrashCoord(), supervisor);
+            break;
+          case 9:
+            //Crash replica in election coordinator
+            replicaId = readInput(in, replicaNames);
+            if (replicaId == -1) break;
+            replica = group.get(replicaId);
+            supervisor.tell(new CrashCoord(), supervisor);
+            Node.delay(Node.HEARTBEAT_TIMEOUT_DURATION + 1000);
+            replica.tell(new CrashMsg(), replica);
+            break;
+          case 10:
+            //Crash two replicas in election coordinator
+            for(int i = 0; i < 2; i++){
+              replicaId = readInput(in, replicaNames);
+              if (replicaId == -1) break;
+              replicas.add(group.get(replicaId));
+            }
+            supervisor.tell(new CrashCoord(), supervisor);
+            Node.delay(Node.HEARTBEAT_TIMEOUT_DURATION + 1000);
+            replicas.forEach(r -> r.tell(new CrashMsg(), r));
+            break;
+          case 11:
+            // Read history
+            supervisor.tell(new ReadHistory(), supervisor);
+            break;
           default:
             break;
         }
@@ -161,6 +251,13 @@ public class Cluster {
     }
   }
 
+  /**
+   * Reads input from the user to select an action from a list of actions.
+   *
+   * @param in A {@code Scanner} object to read user input.
+   * @param actions An array of strings representing the available actions.
+   * @return The index of the selected action.
+   */
   private static int readInput(Scanner in, String[] actions) {
     System.out.println("\n#########\n");
     System.out.println("Please select menu item");
@@ -183,6 +280,53 @@ public class Cluster {
             in.next(); // Consume the invalid input
         }
     }
+    logWithMDC("Action chosen: [" + value + "] - " + actions[value],contextMap, logger, LogLevel.INFO);
     return value;
   }
+
+  /**
+   * Logs a message with the given context map and log level using the provided logger.
+   *
+   * @param message The message to be logged.
+   * @param contextMap A map containing the context information for MDC.
+   * @param logger The logger to be used for logging the message.
+   * @param level The log level at which the message should be logged.
+   */
+  public static void logWithMDC(String message, Map<String, String> contextMap, Logger logger, LogLevel level) {
+      try {
+            // Set MDC logContext
+            contextMap.forEach(MDC::put);
+            // Log the message at the specified level
+            switch (level) {
+                case INFO:
+                    logger.info(message);
+                    break;
+                case WARN:
+                    logger.warn(message);
+                    break;
+                case ERROR:
+                    logger.error(message);
+                    break;
+                case DEBUG:
+                    logger.debug(message);
+                    break;
+            }
+        } finally {
+            // Clear MDC context
+            MDC.clear();
+        }
+  }
+  /**
+   * Enum representing the log levels.
+   */
+  public enum LogLevel {
+      INFO, WARN, ERROR, DEBUG
+  }
 }
+
+
+/*
+enum LogLevel {
+  INFO, WARN, ERROR, DEBUG
+}
+ */
