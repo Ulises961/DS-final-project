@@ -550,12 +550,13 @@ public class Replica extends Node {
 
         // update self, not the message.
         updateCoordinator(electionMessage.proposedCoordinator);
-      } else if (epochSeqNumList.get(0).getCurrentEpoch() < this.epochSeqNumPair.getCurrentEpoch()) {
+      } else if (epochSeqNumList.get(0).getCurrentEpoch() < epochSeqNumList.get(0).getCurrentEpoch()) {
         // we have the latest version so far, we must update the message and forward it.
         proposedCoord = getSelf();
         proposedCoordinatorID = this.id;
         update = this.updateHistory;
-
+        log("history received epoch" + epochSeqNumList.get(0).getCurrentEpoch(), Cluster.LogLevel.DEBUG);
+        log("current history epoch" + epochSeqNumList.get(0).getCurrentEpoch(), Cluster.LogLevel.DEBUG);
         log("I have the latest version", Cluster.LogLevel.DEBUG);
       } else {
         // everything matches, break ties using node id
@@ -627,6 +628,10 @@ public class Replica extends Node {
       flushedReplicas.add(getSender());
       log("Flushed replicas: " + flushedReplicas.toString(), Cluster.LogLevel.DEBUG);
       log("Can propose view: " + (flushedReplicas.size() >= participants.size()), Cluster.LogLevel.DEBUG);
+      
+      // Set up a timeout in case the new view can never be established
+      createElectionTimeout();
+
       if (flushedReplicas.size() >= participants.size()) {
         
         epochSeqNumPair = new EpochSeqNum(epochSeqNumPair.currentEpoch + 1, 0);
@@ -636,7 +641,11 @@ public class Replica extends Node {
         getSelf().tell(new ViewChangeMsg(epochSeqNumPair, participants, getSelf()), getSelf());
         // Then tell the rest of the replicas
         multicastExcept(new ViewChangeMsg(epochSeqNumPair, participants, coordinator), getSelf());
-
+    
+        if(electionTimeout != null){
+          electionTimeout.cancel();
+        }
+    
         log("View change message sent", LogLevel.INFO);
       }
     }
