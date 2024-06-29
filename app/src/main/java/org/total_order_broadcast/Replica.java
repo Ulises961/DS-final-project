@@ -164,7 +164,7 @@ public class Replica extends Node {
       .match(ViewChangeMsg.class, this::onViewChange)
       .match(CrashMsg.class, this::onCrash)
       .match(ICMPRequest.class, this::onPing)
-
+      .match(ReadDataMsg.class, this::onReadMessage)
       .matchAny(msg -> log("Ignoring " + msg.getClass().getSimpleName() + " (election mode)", LogLevel.DEBUG))
       .build();
   }
@@ -368,16 +368,6 @@ public class Replica extends Node {
 
       if(isCoordinator()){
         pendingRequests.remove(msg.epochSeqNum);
-      }
-
-      // Check if there are any pending writes that can now be committed
-      while(unstableWrites.containsKey(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1))){
-        WriteOk writeOk = unstableWrites.get(new EpochSeqNum(epochSeqNumPair.currentEpoch, epochSeqNumPair.seqNum + 1));
-        
-        log("Committing deferred value: " + writeOk.value + " SeqNum: " + writeOk.epochSeqNum.seqNum, Cluster.LogLevel.INFO);
-        
-        commitDecision(writeOk.value, writeOk.epochSeqNum);
-        unstableWrites.remove(writeOk.epochSeqNum);
       }
 
     } else if(msg.epochSeqNum.seqNum >= epochSeqNumPair.seqNum){
