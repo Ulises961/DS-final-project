@@ -1,0 +1,51 @@
+<configuration>
+    <property name="LOG_DIR" value="./build/logs" />
+    <property name="DEBUG" value="debug" />
+    <property name="INFO" value="info" />
+    <property name="LOG_NAME" value="cluster" />
+
+    <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%logger{0} %X{replicaId} %msg%n</pattern>
+        </encoder>
+    </appender>
+
+     <appender name="debug" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${DEBUG}/${LOG_NAME}.${DEBUG}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${DEBUG}/${LOG_NAME}.${DEBUG}.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+                <maxFileSize>10MB</maxFileSize>
+                <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%logger{0} %X{replicaId} %msg%n</pattern>
+            <outputPatternAsHeader>true</outputPatternAsHeader>
+        </encoder>
+    </appender>
+
+    <appender name="info" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${INFO}/${LOG_NAME}.${INFO}.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${INFO}/${LOG_NAME}.${INFO}.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+                <maxFileSize>10MB</maxFileSize>
+                <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%logger{0} %X{replicaId} %msg%n</pattern>
+            <outputPatternAsHeader>true</outputPatternAsHeader>
+        </encoder>
+    </appender>
+
+
+    <logger name="org.total_order_broadcast">
+        <appender-ref ref="console"/>
+    </logger>
+
+    <root level="debug">
+        <appender-ref ref="debug" />
+        <appender-ref ref="info" />
+    </root>
+</configuration>
