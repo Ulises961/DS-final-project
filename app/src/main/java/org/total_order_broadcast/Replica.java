@@ -609,14 +609,14 @@ public class Replica extends Node {
 
     // The new coordinator is elected
     if(electionTimeout != null){
-      log("Cancelling election timeout", Cluster.LogLevel.INFO);
+      log("Cancelling election timeout", Cluster.LogLevel.DEBUG);
       electionTimeout.cancel();
       setElectionTimeout = false;
     }
 
     // All votes have been performed
     if(voteTimeout != null){
-      log("Cancelling vote timeout", Cluster.LogLevel.INFO);
+      log("Cancelling vote timeout", Cluster.LogLevel.DEBUG);
       voteTimeout.cancel();
     }
     
