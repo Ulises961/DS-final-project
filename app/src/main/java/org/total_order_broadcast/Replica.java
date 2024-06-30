@@ -272,7 +272,7 @@ public class Replica extends Node {
       } else {
         log("Received update message from client " + msg.sender.path().name() + " with value: " + msg.value, Cluster.LogLevel.INFO);
         log("Forwarding update message to coordinator: " + coordinator.path().name() + " with value " + msg.value, Cluster.LogLevel.DEBUG);
-        // forward request to the coordinator, do not propagate the shouldCrash flag
+
         coordinator.tell(new WriteDataMsg(msg.value, getSelf()), getSelf());
         
         // Keep message in memory as pending
@@ -307,7 +307,7 @@ public class Replica extends Node {
     // Wait for a WriteOk from the coordinator 
     updateTimeOut = setTimeout(DECISION_TIMEOUT, new UpdateTimeOut(msg.epochSeqNum));
     
-    // Assume the heartbeat is received
+    // Every message from the coordinator counts as a heartbeat
     renewHeartbeatTimeout();
   }
 
@@ -349,14 +349,10 @@ public class Replica extends Node {
    *            and proposer details.
    */
   public void onWriteOk(WriteOk msg) {
-    
-    // Cancel the timeout for the update request
     updateTimeOut.cancel();
 
-    // Assume the heartbeat is received
     renewHeartbeatTimeout();
 
-    // Check if the message is the next in sequence
     if(msg.epochSeqNum.seqNum == epochSeqNumPair.seqNum + 1){
       log("Committing value: " + msg.value + " SeqNum: " + msg.epochSeqNum.seqNum, Cluster.LogLevel.INFO);
 
@@ -391,12 +387,10 @@ public class Replica extends Node {
       log("Remaining messages: " + pendingMsg, Cluster.LogLevel.INFO);
      
       if (isCoordinator()) {
-        // Remove the message from the pending requests list
         pendingRequests.remove(msg.epochSeqNum);
       } 
 
       log("Is pending message empty: " + pendingMsg.isEmpty(), Cluster.LogLevel.DEBUG);
-      // After all messages have been committed, send a flush message to change the view
       if(pendingMsg.isEmpty()){
         log("All pending messages have been committed, tell coordinator " + coordinator.path().name(), Cluster.LogLevel.DEBUG);
         coordinator.tell(new FlushMsg(), getSelf());
@@ -504,8 +498,7 @@ public class Replica extends Node {
         createElectionTimeout();
       }
 
-      // A replica has received an election message, it must defer 
-      // messages until the new view is established
+      // Defer all messages until the new view is established
       deferringMessages = true;
       hasReceivedElectionMessage = true;
       
@@ -516,7 +509,6 @@ public class Replica extends Node {
       // Add itself to the active replicas set for the current election 
       electionMessage.activeReplicas.get(epochSeqNumPair.currentEpoch).add(getSelf());
 
-      // View update content
       proposedCoord = electionMessage.proposedCoordinator;
       proposedCoordinatorID = electionMessage.proposedCoordinatorID;
       updateCoordinator(proposedCoord);
@@ -537,9 +529,8 @@ public class Replica extends Node {
         // since epoch updates are sequential we can iterate over the difference diff.
         int pos = 0;
         while (pos < diff) {
-          // there's probably a better way to do this but I can't think of it rn :)
-          // the idea is that we get the epochSeqNum from the List, then we obtain the value from the hashmap
-          // and add those to our updateHistory
+          // Get the epochSeqNum from the List, then obtain the value from the hashmap
+          // and add those to the updateHistory
           EpochSeqNum key = epochSeqNumList.get(pos);
           Integer value = electionMessage.updateHistory.get(key);
           this.updateHistory.put(key, value);
@@ -587,12 +578,11 @@ public class Replica extends Node {
   public void onSyncMessageReceipt(SyncMessage sm){
     this.updateHistory = new HashMap<>(sm.updateHistory);
     
-    // Assume this message as a new heartbeat
     if(!isCoordinator()){
       renewHeartbeatTimeout();
     }
 
-    // The new coordinator is elected
+    // The new coordinator has been elected, the election is over
     if(electionTimeout != null){
       log("Cancelling election timeout", Cluster.LogLevel.DEBUG);
       electionTimeout.cancel();
