@@ -177,7 +177,7 @@ public class Client extends Node {
      */
     public void onRequestRead(RequestRead msg){
         if(server != null){
-            log("read req to " + server.path().name(), Cluster.LogLevel.INFO);
+            log("read req to " + server.path().name().split("-")[1], Cluster.LogLevel.INFO);
             server.tell(new ReadDataMsg(getSelf()),getSelf());
             readTimeout = setTimeout(READ_TIMEOUT, new Timeout());
         } 
